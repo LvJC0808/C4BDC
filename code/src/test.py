@@ -1,4 +1,4 @@
-"""Training entrypoint (thin wrapper around pipeline.cmd_train)."""
+"""Competition test entrypoint (alias for predict)."""
 from __future__ import annotations
 
 import sys
@@ -6,18 +6,18 @@ from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-    from code.src.pipeline import build_parser, cmd_train  # type: ignore
+    from code.src.pipeline import build_parser, cmd_predict  # type: ignore
 else:
-    from .pipeline import build_parser, cmd_train
+    from .pipeline import build_parser, cmd_predict
 
 
 def main(argv=None) -> int:
     parser = build_parser()
     argv = list(argv) if argv is not None else sys.argv[1:]
-    if not argv or argv[0] != "train":
-        argv = ["train", *argv]
+    if not argv or argv[0] != "predict":
+        argv = ["predict", *argv]
     args = parser.parse_args(argv)
-    cmd_train(args)
+    cmd_predict(args)
     return 0
 
 
