@@ -32,9 +32,16 @@ def engineer_alpha158(df: pd.DataFrame) -> pd.DataFrame:
     stock code column named 'instrument'.
     """
     out_frames = []
+    MIN_ROWS = 60  # largest alpha158 window
     for code, g in tqdm(df.groupby('股票代码'), desc="alpha158"):
         g = g.sort_values('日期').reset_index(drop=True)
-        feat = bu.engineer_features(g)
+        if len(g) < MIN_ROWS:
+            continue
+        try:
+            feat = bu.engineer_features(g)
+        except Exception as e:
+            print(f"  [alpha158] skip {code}: {e}")
+            continue
         feat['instrument'] = code
         out_frames.append(feat)
     result = pd.concat(out_frames, ignore_index=True)
