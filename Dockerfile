@@ -35,6 +35,9 @@ RUN uv sync --frozen
 # Copy the application code
 COPY . .
 
+# Ensure runtime directories exist
+RUN mkdir -p /app/model /app/output /app/temp
+
 # Set environment to use the virtual environment
 ENV PATH="/app/.venv/bin:$PATH"
 ENV LD_LIBRARY_PATH="/usr/lib:/usr/local/lib"
