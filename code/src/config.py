@@ -1,23 +1,86 @@
-# 配置参数
-sequence_length = 60
-feature_num = '158+39'
-config = {
-    'sequence_length': sequence_length,   # 使用过去60个交易日的数据（排序任务可以用稍短的序列）
-    'd_model': 256,          # Transformer输入维度
-    'nhead': 4,             # 注意力头数量
-    'num_layers': 3,        # Transformer层数
-    'dim_feedforward': 512, # 前馈网络维度
-    'batch_size': 4,        # 排序任务batch_size可以小一些，因为每个batch包含更多股票
-    'num_epochs': 50,       # 排序任务可能需要更多epochs
-    'learning_rate': 1e-5,  # 稍微降低学习率
-    'dropout': 0.1,
-    'feature_num': feature_num,
-    'max_grad_norm': 5.0,
+# code/src/config.py
+import os
 
-    'pairwise_weight': 1, # 配对损失权重
-    'base_weight': 1.0, # 非top-k样本权重
-    'top5_weight': 2.0, # top-5样本权重（应大于base_weight）
+SEED = 42
+SEEDS = [42, 2024, 7]
 
-    'output_dir': f'./model/{sequence_length}_{feature_num}',
-    'data_path': './data',
+DATA_PATH = os.environ.get("DATA_PATH", "./data")
+MODEL_DIR = os.environ.get("MODEL_DIR", "./model")
+TEMP_DIR = os.environ.get("TEMP_DIR", "./temp")
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./output")
+
+# Feature sets
+SEQUENCE_LENGTH = 60
+ALPHA158_DIM = 158
+ALPHA360_FIELDS = ["open", "high", "low", "close", "volume", "amount"]
+ALPHA360_LOOKBACK = 60
+
+# Neutralization
+NEUTRALIZE = True
+NEUTRALIZE_FACTORS = ["industry", "log_mktcap", "beta60"]
+
+# CV
+CV_FOLDS = 3
+CV_EMBARGO = 5
+CV_VAL_DAYS = 20
+CV_FOLD_GAP = 50   # gap between fold end points
+HOLDOUT_DAYS = 20
+
+# LightGBM
+LGB_PARAMS = {
+    "objective": "regression_l1",
+    "num_leaves": 64,
+    "learning_rate": 0.02,
+    "feature_fraction": 0.7,
+    "bagging_fraction": 0.7,
+    "bagging_freq": 1,
+    "min_data_in_leaf": 200,
+    "verbose": -1,
+    "deterministic": True,
+    "force_row_wise": True,
+    "seed": SEED,
 }
+LGB_ROUNDS = 2000
+LGB_EARLY_STOP = 50
+LGB_DE_ROUNDS = 3  # DoubleEnsemble iterations
+
+# MASTER
+MASTER_CONFIG = {
+    "lookback": 8,
+    "d_model": 256,
+    "n_head": 4,
+    "dropout": 0.5,
+    "beta": 5,
+    "market_feat_dim": 63,
+    "feat_dim": 158,
+    "epochs": 40,
+    "lr": 1e-4,
+    "weight_decay": 1e-3,
+    "patience": 10,
+    "loss_mse_w": 0.5,
+    "loss_ic_w": 0.5,
+    "loss_topk_w": 0.1,
+}
+
+# StockMixer
+MIXER_CONFIG = {
+    "lookback": 16,
+    "hidden": 128,
+    "scale": 3,
+    "market_scale": 3,
+    "feat_dim": 6,
+    "epochs": 40,
+    "lr": 1e-4,
+    "weight_decay": 1e-3,
+    "patience": 10,
+}
+
+# Ensemble
+ENSEMBLE_INIT_WEIGHTS = {"lgb": 0.4, "master": 0.4, "mixer": 0.2}
+TOP_K_CANDIDATES = [3, 4, 5]
+POSITION_ALPHAS = [0.3, 0.5, 0.7]
+MIN_POSITION = 0.5
+
+# Sample pool filters
+MIN_LIST_DAYS = 250
+MAX_SUSPEND_DAYS = 5
