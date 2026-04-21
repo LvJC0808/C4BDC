@@ -39,6 +39,7 @@ LGB_PARAMS = {
     "deterministic": True,
     "force_row_wise": True,
     "seed": SEED,
+    "num_threads": int(os.environ.get("LGB_NUM_THREADS", "4")),
 }
 LGB_ROUNDS = 2000
 LGB_EARLY_STOP = 50
