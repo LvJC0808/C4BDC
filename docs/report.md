@@ -262,9 +262,59 @@ python pipeline.py predict --data_path /app/data --model_dir /app/model --temp_d
 
 ---
 
-## 10. 结论
+## 11. Phase-A 优化（集成稳健化 + 交易摩擦）
+
+### 11.1 三项改进
+
+| 改进 | 核心思想 | 模块 |
+|---|---|---|
+| **Tradability filter** | T 日涨停/跌停股票次日开盘无法按预期成交，从候选池剔除（主板 ±10%，创业板/科创板 ±20%） | `ensemble/tradability.py` |
+| **Transaction cost** | 手续费 3 bp/side × 2 = 6 bp/周，从回测收益扣除（对等权/动量 baseline 同样扣除，保证公平） | `rolling_backtest.py --cost_bps` |
+| **Dynamic weights** | 用过去 20 天每模型 RankIC 做 softmax 动态权重，替代 holdout grid-search 的固定 `{lgb:0.1, master:0.9, mixer:0.0}` | `blender.rolling_ic_weights` + `blend_scores_dynamic` |
+
+### 11.2 对比回测（2025-11-03 ~ 2026-03-06）
+
+| 配置 | Mean 5 日 | Std | 胜率 | t-test vs 等权 | N |
+|---|---|---|---|---|---|
+| **Baseline**（固定权重，无摩擦） | **+1.01%** | 1.54% | 75.86% | t=+4.78, p<0.0001 | 87 |
+| **+Tradable +Cost 3bp** | **+1.00%** | 1.57% | 75.61% | t=+4.50, **p<0.0001** | 82 |
+| **+Dynamic weights**（全部开启） | +0.86% | 1.67% | 67.07% | t=+4.08, p=0.0001 | 82 |
+
+### 11.3 关键观察
+
+- **Tradable + Cost 几乎零损耗**：mean 仅下降 1 bp，但选股更贴近真实可成交条件，且对等权 baseline 的显著性保持 p<0.0001 → **推荐作为正式提交配置**。
+- **Dynamic weights 在本窗口表现反而下降 15 bp**：原因推测是 87 天内模型相对优势相对稳定，rolling-IC 的自适应在短时噪声下过度调整。保留为 B/C 组实验，待回测窗口 ≥150 天再复评。
+- **动量 Top-K 全程亏损**（−0.74%/周），说明 2025-11~2026-03 窗口非动量有效期，我方 alpha 不依赖趋势。
+
+### 11.4 新增交付物
+
+| 文件 | 说明 |
+|---|---|
+| `code/src/ensemble/tradability.py` | 涨停/跌停检测 + Top-K 回填 |
+| `code/src/ensemble/blender.py`（+102 行） | `rolling_ic_weights`、`blend_scores_dynamic` |
+| `code/src/ensemble/portfolio.py` | `build_portfolio` 新增 `tradable_ids` 参数 |
+| `code/src/pipeline.py` | `cmd_predict` 支持 `blend_mode=dynamic` + 自动 tradability |
+| `test/rolling_backtest.py` | 新 flags：`--cost_bps / --dynamic_weights / --tradable_filter` |
+| `test/rolling_backtest_tradable.csv` / `_dynamic.csv` | 对比实验结果 |
+
+### 11.5 Commit 索引
+
+| 内容 | Commit |
+|---|---|
+| Spec | `70129b2` |
+| Plan | `413bd1d` |
+| Task 1 tradability | `772f35e` |
+| Task 2 dynamic weights | `c8f6d83` |
+| Task 3 portfolio filter | `063d79b` |
+| Task 4 pipeline integration | `77aecf4` |
+| Task 5 backtest flags | `2548196` |
+
+---
+
+## 12. 结论
 
 - **pipeline 端到端跑通**，Docker 包可直接交付
-- **87 天滚动回测 p<0.0001 显著跑赢等权 baseline**，超额收益 ~90 bp / 5 日
+- **82 天滚动回测 p<0.0001 显著跑赢等权 baseline**，超额收益 ~87 bp / 5 日（扣除交易摩擦后）
+- **Phase-A 优化后**：涨停过滤 + 手续费建模对收益几乎无损，推荐作为正式提交配置
 - **训练 6.3 h、推理 <3 min、镜像 ~4 GB**，全部在赛题硬约束内
-- 下一步聚焦：扩大回测窗口、稳健化集成权重、冲击成本敏感性分析、最终镜像打包上传
+- 下一步聚焦：扩大回测窗口、4060 硬件验证、Docker 打包上传
