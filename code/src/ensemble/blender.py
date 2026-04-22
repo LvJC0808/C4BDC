@@ -108,6 +108,102 @@ def grid_search_weights(
     return best
 
 
+def rolling_ic_weights(
+    model_scores: Dict[str, pd.DataFrame],
+    labels: pd.DataFrame,
+    window: int = 20,
+    beta: float = 1.0,
+    date_col: str = "datetime",
+    id_col: str = "instrument",
+    score_col: str = "score",
+) -> pd.DataFrame:
+    """Compute per-date per-model weights from rolling Spearman IC.
+
+    Returns DataFrame[date, model, weight] where weights sum to 1 per date.
+    For dates with insufficient history, returns uniform weights.
+    """
+    from scipy.stats import spearmanr
+
+    labels = labels.dropna(subset=["label"])
+    all_dates = sorted(set().union(*(set(v[date_col].unique())
+                                     for v in model_scores.values())))
+    names = list(model_scores.keys())
+    n = len(names)
+
+    per_date_ic: Dict[str, Dict] = {nm: {} for nm in names}
+    for nm in names:
+        df = model_scores[nm]
+        merged = df.merge(labels, on=[id_col, date_col], how="inner")
+        for dd, g in merged.groupby(date_col):
+            if len(g) < 5:
+                continue
+            ic, _ = spearmanr(g[score_col], g["label"])
+            if np.isfinite(ic):
+                per_date_ic[nm][dd] = float(ic)
+
+    rows = []
+    for i, d in enumerate(all_dates):
+        hist_dates = all_dates[max(0, i - window):i]
+        if len(hist_dates) < 3:
+            for nm in names:
+                rows.append({"date": d, "model": nm, "weight": 1.0 / n})
+            continue
+        ics = {}
+        for nm in names:
+            day_ics = [per_date_ic[nm][dd] for dd in hist_dates if dd in per_date_ic[nm]]
+            ics[nm] = float(np.mean(day_ics)) if day_ics else 0.0
+        vals = np.array([ics[nm] for nm in names])
+        exp_vals = np.exp(beta * (vals - vals.max()))
+        w = exp_vals / exp_vals.sum()
+        for j, nm in enumerate(names):
+            rows.append({"date": d, "model": nm, "weight": float(w[j])})
+    return pd.DataFrame(rows)
+
+
+def blend_scores_dynamic(
+    model_scores: Dict[str, pd.DataFrame],
+    weight_df: pd.DataFrame,
+    date_col: str = "datetime",
+    id_col: str = "instrument",
+    score_col: str = "score",
+) -> pd.DataFrame:
+    """Like blend_scores but with per-date weights from weight_df.
+
+    weight_df has columns [date, model, weight]. Vectorized O(N) impl.
+    """
+    names = list(model_scores.keys())
+    n_models = len(names)
+
+    w_wide = weight_df.pivot_table(
+        index="date", columns="model", values="weight", aggfunc="first"
+    )
+    for nm in names:
+        if nm not in w_wide.columns:
+            w_wide[nm] = np.nan
+    w_wide = w_wide[names]
+
+    merged = None
+    for name, df in model_scores.items():
+        sub = df[[id_col, date_col, score_col]].copy()
+        sub["rank"] = rank_normalize_panel(sub, score_col, date_col=date_col)
+        sub = sub[[id_col, date_col, "rank"]].rename(columns={"rank": f"rank_{name}"})
+        merged = sub if merged is None else merged.merge(
+            sub, on=[id_col, date_col], how="outer"
+        )
+
+    dates = merged[date_col]
+    final = np.zeros(len(merged), dtype=float)
+    for name in names:
+        ranks = merged[f"rank_{name}"].fillna(0.5).to_numpy()
+        w_map = w_wide[name].to_dict()
+        ws = dates.map(w_map).fillna(1.0 / n_models).to_numpy()
+        final += ws * ranks
+
+    out = merged[[id_col, date_col]].copy()
+    out["final_score"] = final
+    return out
+
+
 def _self_test() -> None:
     rng = np.random.default_rng(0)
     dates = pd.date_range("2024-01-01", periods=10, freq="D")
@@ -138,6 +234,12 @@ def _self_test() -> None:
     assert abs(sum(result["weights"].values()) - 1.0) < 1e-6
     assert result["top_k"] in [3, 4, 5]
     print(f"best weights={result['weights']} K={result['top_k']} score={result['score']:.4f}")
+
+    wdf = rolling_ic_weights(model_scores, labels, window=5, beta=1.0)
+    assert list(wdf.columns) == ["date", "model", "weight"]
+    dyn = blend_scores_dynamic(model_scores, wdf)
+    assert "final_score" in dyn.columns and len(dyn) > 0
+
     print("OK")
 
 
