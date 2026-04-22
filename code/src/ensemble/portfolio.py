@@ -41,12 +41,19 @@ def build_portfolio(
     alpha: float,
     top_k: int,
     min_position: float = 0.5,
+    tradable_ids: set = None,
 ) -> pd.DataFrame:
     """Build equal-weighted Top-K portfolio with confidence-scaled gross exposure."""
     total_position = min_position + alpha * (1.0 - min_position) * float(confidence)
     total_position = float(np.clip(total_position, 0.0, 1.0))
-    topk = blended_scores_today.nlargest(top_k, "final_score").copy()
-    weight = total_position / max(len(topk), 1)
+    df = blended_scores_today
+    if tradable_ids is not None:
+        df = df[df["instrument"].isin(tradable_ids)]
+    topk = df.nlargest(top_k, "final_score").copy()
+    actual_k = len(topk)
+    if actual_k == 0:
+        return pd.DataFrame(columns=["stock_id", "weight"])
+    weight = total_position / actual_k
     topk["weight"] = weight
     out = topk[["instrument", "weight"]].rename(columns={"instrument": "stock_id"})
     return out.reset_index(drop=True)
