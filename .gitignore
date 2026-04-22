@@ -19,3 +19,17 @@ wheels/
 
 *.tar
 
+# Trained models & large data (distributed via Docker or rsync, not git)
+model/lgb/
+model/master/
+model/mixer/
+model/5090/
+model/4060/
+model/ensemble_config.json
+model/repro_check.log
+data/*.csv
+temp/
+output/result.csv
+
+# Local smoke/experiments
+smoke_train.py

@@ -2,7 +2,7 @@
 import os
 
 SEED = 42
-SEEDS = [42, 2024, 7]
+SEEDS = [int(x) for x in os.environ.get("SEEDS", "42,2024,7").split(",")]
 
 DATA_PATH = os.environ.get("DATA_PATH", "./data")
 MODEL_DIR = os.environ.get("MODEL_DIR", "./model")
