@@ -26,10 +26,14 @@ try:
     from .models.lgb_de import DoubleEnsembleModel
     from .models.master import MasterTrainer
     from .models.stockmixer import MixerTrainer
-    from .ensemble.blender import blend_scores, grid_search_weights, rank_normalize
+    from .ensemble.blender import (
+        blend_scores, grid_search_weights, rank_normalize,
+        blend_scores_dynamic, rolling_ic_weights,
+    )
     from .ensemble.portfolio import (
         compute_confidence, build_portfolio, grid_search_portfolio_params,
     )
+    from .ensemble.tradability import get_tradable_ids
 except ImportError:  # script-style
     _here = Path(__file__).resolve().parent
     sys.path.insert(0, str(_here.parent.parent))
@@ -41,10 +45,14 @@ except ImportError:  # script-style
     from code.src.models.lgb_de import DoubleEnsembleModel  # type: ignore
     from code.src.models.master import MasterTrainer  # type: ignore
     from code.src.models.stockmixer import MixerTrainer  # type: ignore
-    from code.src.ensemble.blender import blend_scores, grid_search_weights, rank_normalize  # type: ignore
+    from code.src.ensemble.blender import (  # type: ignore
+        blend_scores, grid_search_weights, rank_normalize,
+        blend_scores_dynamic, rolling_ic_weights,
+    )
     from code.src.ensemble.portfolio import (  # type: ignore
         compute_confidence, build_portfolio, grid_search_portfolio_params,
     )
+    from code.src.ensemble.tradability import get_tradable_ids  # type: ignore
 
 
 MODEL_NAMES = ("lgb", "master", "mixer")
@@ -368,6 +376,9 @@ def cmd_predict(args) -> None:
     weights = ens_cfg["weights"]
     top_k = int(ens_cfg["top_k"])
     alpha = float(ens_cfg["alpha"])
+    blend_mode = str(ens_cfg.get("blend_mode", "static"))
+    rolling_window = int(ens_cfg.get("rolling_window", 20))
+    rolling_beta = float(ens_cfg.get("rolling_beta", 1.0))
 
     feature_sets = build_feature_sets(
         args.data_path, args.temp_dir, use_cache=True,
@@ -417,15 +428,23 @@ def cmd_predict(args) -> None:
     if not per_model_today:
         raise RuntimeError("No per-model predictions generated.")
 
-    # Blend today
-    blended_today = blend_scores(per_model_today, weights)
-    # Blend history for IC
-    blended_hist = blend_scores(per_model_hist, weights)
-
-    # Rolling IC vs labels
+    # Blend today (+ history for IC)
     lgb_panel = feature_sets["lgb"]["panel"].copy()
     lgb_panel["datetime"] = pd.to_datetime(lgb_panel["datetime"])
     labels = lgb_panel[["instrument", "datetime", "label"]]
+
+    if blend_mode == "dynamic":
+        weight_df = rolling_ic_weights(
+            per_model_hist, labels,
+            window=rolling_window, beta=rolling_beta,
+        )
+        blended_today = blend_scores_dynamic(per_model_today, weight_df)
+        blended_hist = blend_scores_dynamic(per_model_hist, weight_df)
+    else:
+        blended_today = blend_scores(per_model_today, weights)
+        blended_hist = blend_scores(per_model_hist, weights)
+
+    # Rolling IC vs labels
     roll_ic = _rolling_ic(blended_hist, labels, target_date, window=20)
     print(f"[predict] rolling_ic = {roll_ic:.4f}")
 
@@ -434,8 +453,13 @@ def cmd_predict(args) -> None:
     confidence = compute_confidence(scores_series, per_model_topk, roll_ic, top_k=top_k)
     print(f"[predict] confidence = {confidence:.3f}")
 
+    raw_stock = pd.read_csv(os.path.join(args.data_path, "stock_data.csv"))
+    tradable = get_tradable_ids(raw_stock, target_date)
+    print(f"[predict] tradable count = {len(tradable)}")
+
     portfolio = build_portfolio(today_df, confidence, alpha=alpha, top_k=top_k,
-                                min_position=config.MIN_POSITION)
+                                min_position=config.MIN_POSITION,
+                                tradable_ids=tradable)
     _ensure_dirs(os.path.dirname(args.output_path) or ".")
     portfolio[["stock_id", "weight"]].to_csv(args.output_path, index=False)
     print(f"[predict] wrote {args.output_path} ({len(portfolio)} rows)")
