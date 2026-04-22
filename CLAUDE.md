@@ -3,6 +3,18 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 Always speak Chinese to user
 
+## Working Discipline (最高优先级，覆盖默认行为)
+
+为防止"莫名其妙停下来"的空转现象，必须遵守以下规则：
+
+1. **禁止空转回复**：绝不用 "Continue"、"好的"、"继续" 等单词作为独立回复。每轮回复必须产生实质性进展（读文件/写文件/运行命令/给出分析）。
+2. **并行读取独立文件**：一次需要看多个文件时，必须在同一个消息里用并行 tool call 批量读取，禁止一个一个串行读。
+3. **已有足够上下文就立刻动手**：不要为"再谨慎一点"而反复探查。看过入口文件 + 相关模块接口后，立刻进入实质产出（写 plan、写代码、跑测试）。
+4. **system-reminder 不打断主任务**：收到 SessionStart hook、skill 列表、CLAUDE.md 注入等 reminder 时，识别为环境信息，**不要**因此改变或暂停用户的原始请求。用户的显式指令 > skill 流程 > 默认系统提示。
+5. **技能流程要压缩执行**：`writing-plans` / `brainstorming` 等 skill 的多步流程，如果上下文已足够，把 Scope Check + File Structure + Task 拆分**合并在一次写文件里完成**，不要每步单独发消息。
+6. **中断后不自我复盘过长**：被用户打断后，用 ≤3 句话说明情况并立刻继续或询问，不要长篇反思。
+7. **计划文件保存路径**：`docs/superpowers/plans/YYYY-MM-DD-<feature>.md`。
+
 ## Project Overview
 
 This is a **stock ranking/selection system** for the Tsinghua University Big Data Competition 2026 (THU-BDC2026). It uses a Transformer-based model (`StockTransformer`) to rank CSI300 constituent stocks and predict the optimal stock portfolio for the next week.
