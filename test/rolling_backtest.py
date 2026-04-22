@@ -47,10 +47,13 @@ from code.src.features.build import build_feature_sets  # noqa: E402
 from code.src.pipeline import (  # noqa: E402
     _load_model, _predict_scores, set_global_seed,
 )
-from code.src.ensemble.blender import blend_scores  # noqa: E402
+from code.src.ensemble.blender import (  # noqa: E402
+    blend_scores, blend_scores_dynamic, rolling_ic_weights,
+)
 from code.src.ensemble.portfolio import (  # noqa: E402
     compute_confidence, build_portfolio,
 )
+from code.src.ensemble.tradability import get_tradable_ids  # noqa: E402
 import json
 
 
@@ -117,6 +120,12 @@ def main() -> None:
                     help="If None, use eval_end + 10 trading days")
     ap.add_argument("--out", default="test/rolling_backtest.csv")
     ap.add_argument("--min_future_days", type=int, default=5)
+    ap.add_argument("--cost_bps", type=float, default=0.0,
+                    help="One-way transaction cost in basis points.")
+    ap.add_argument("--dynamic_weights", action="store_true",
+                    help="Use rolling_ic_weights + blend_scores_dynamic.")
+    ap.add_argument("--tradable_filter", action="store_true",
+                    help="Per-date filter to tradable ids via get_tradable_ids.")
     args = ap.parse_args()
 
     set_global_seed(config.SEED)
@@ -179,13 +188,20 @@ def main() -> None:
               f"{agg['datetime'].min().date()}..{agg['datetime'].max().date()}")
 
     # Blend once over the full feature window (per-date rank-normalize inside)
-    blended_all = blend_scores(per_model_scores, weights)
-    blended_all["datetime"] = pd.to_datetime(blended_all["datetime"])
-
-    # Labels for rolling IC
+    # Labels for rolling IC / dynamic weights
     lgb_panel = feature_sets["lgb"]["panel"].copy()
     lgb_panel["datetime"] = pd.to_datetime(lgb_panel["datetime"])
     all_labels = lgb_panel[["instrument", "datetime", "label"]].copy()
+
+    if args.dynamic_weights:
+        wdf = rolling_ic_weights(per_model_scores, all_labels, window=20, beta=1.0)
+        blended_all = blend_scores_dynamic(per_model_scores, wdf)
+        print(f"[rb] dynamic weights enabled (rolling IC, window=20)")
+    else:
+        blended_all = blend_scores(per_model_scores, weights)
+    blended_all["datetime"] = pd.to_datetime(blended_all["datetime"])
+
+    # Labels for rolling IC (already computed above)
 
     # --- Loop over eval dates ---
     all_dates = _trading_dates(stock_df)
@@ -217,15 +233,23 @@ def main() -> None:
         today_scores = today_blended.set_index("instrument")["final_score"]
         conf = compute_confidence(today_scores, topk_sets, ic, top_k=top_k)
 
+        tradable = None
+        if args.tradable_filter:
+            tradable = get_tradable_ids(stock_df, T)
+
         port = build_portfolio(
             today_blended[["instrument", "final_score"]].copy(),
             conf, alpha, top_k, min_position=min_pos,
+            tradable_ids=tradable,
         )
         tickers = port["stock_id"].astype(str).str.zfill(6).tolist()
         weights_arr = port["weight"].to_numpy()
 
         rets = _realized_return(stock_df, T, tickers)
         port_ret = float((weights_arr * rets.reindex(tickers).to_numpy()).sum())
+        cost = args.cost_bps * 1e-4
+        if cost > 0:
+            port_ret -= 2.0 * cost * float(weights_arr.sum())
 
         # Baselines on same universe (HS300 stocks in stock_data that have T+5 data)
         universe = stock_df[stock_df["日期"] == T]["股票代码"].unique().tolist()
@@ -240,6 +264,11 @@ def main() -> None:
         mom_top = mom.dropna().nlargest(top_k).index.tolist()
         mom_rets = _realized_return(stock_df, T, mom_top)
         baseline_mom = float(mom_rets.mean()) if not mom_rets.isna().all() else np.nan
+        if cost > 0:
+            if not np.isnan(baseline_avg):
+                baseline_avg -= 2.0 * cost
+            if not np.isnan(baseline_mom):
+                baseline_mom -= 2.0 * cost * 1.0
 
         rows.append({
             "date": T.date(),
