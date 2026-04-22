@@ -63,6 +63,7 @@ def grid_search_portfolio_params(
 ) -> dict:
     """Iterate (K, α) grid, simulate realized return, return best."""
     merged = blended_scores_panel.merge(labels, on=[id_col, date_col], how="inner")
+    merged = merged.dropna(subset=["label"])
     best = {"top_k": None, "alpha": None, "score": -np.inf}
     for K in top_k_candidates:
         for alpha in alpha_candidates:
@@ -82,6 +83,9 @@ def grid_search_portfolio_params(
                 total += float((picks["weight"] * picks["label"]).sum())
             if total > best["score"]:
                 best = {"top_k": int(K), "alpha": float(alpha), "score": float(total)}
+    if best["top_k"] is None:
+        best = {"top_k": int(top_k_candidates[0]),
+                "alpha": float(alpha_candidates[0]), "score": 0.0}
     return best
 
 

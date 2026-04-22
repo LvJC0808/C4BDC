@@ -80,6 +80,7 @@ def grid_search_weights(
         if abs(sum(combo) - 1.0) < 1e-6:
             points.append(combo)
 
+    labels = labels.dropna(subset=["label"])
     best = {"weights": None, "top_k": None, "score": -np.inf}
     for combo in points:
         weights = {n: float(w) for n, w in zip(names, combo)}
@@ -91,9 +92,19 @@ def grid_search_weights(
             total = 0.0
             for _, g in merged.groupby(date_col):
                 topk = g.nlargest(K, "final_score")
-                total += topk["label"].mean()
+                m = topk["label"].mean()
+                if np.isnan(m):
+                    continue
+                total += m
             if total > best["score"]:
                 best = {"weights": weights, "top_k": int(K), "score": float(total)}
+    if best["weights"] is None:
+        # Fallback: equal weight across models
+        best = {
+            "weights": {n: 1.0 / n_models for n in names},
+            "top_k": int(top_k_list[0]),
+            "score": 0.0,
+        }
     return best
 
 
