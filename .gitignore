@@ -32,4 +32,7 @@ temp/
 output/result.csv
 
 # Local smoke/experiments
-smoke_train.pymodel_lgb_only/
+smoke_train.py
+model_lgb_only/
+test/output/
+

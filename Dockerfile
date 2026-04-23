@@ -29,8 +29,8 @@ WORKDIR /app
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies
-RUN uv sync --frozen
+# Install dependencies for the lean mainline runtime
+RUN uv sync --frozen --no-install-package torch
 
 # Copy the application code
 COPY . .

@@ -19,17 +19,8 @@ dependencies = [
     "ta-lib>=0.6.8",
     "tensorboard>=2.20.0",
     "tensorboardx>=2.6.4",
-    "torch>=2.6.0",
     "tqdm>=4.67.1",
 ]
 
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
-
-[tool.uv.sources]
-torch = [
-    { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
-    { index = "pytorch-cu128", marker = "sys_platform == 'win32'" },
-]
+[project.optional-dependencies]
+legacy = ["torch>=2.6.0"]
