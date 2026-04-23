@@ -88,3 +88,66 @@ def test_optimize_weights_icir_favors_strong_signal_model():
     assert all(v >= -1e-9 for v in w.values())
     assert w["master"] > w["lgb"] and w["master"] > w["mixer"]
     assert w["master"] <= 0.70  # KL shrink 应把极端解拉回
+
+
+def test_select_lambda_loo_returns_valid_choice():
+    from code.src.ensemble.blender import select_lambda_loo, rank_normalize_daily
+    rng = np.random.default_rng(7)
+    n_days, n_stocks = 45, 60
+    dates = pd.date_range("2025-01-01", periods=n_days)
+    fold_ids = np.array_split(np.arange(n_days), 3)
+    instruments = [f"s{i:03d}" for i in range(n_stocks)]
+    labels_rows = []
+    for d in dates:
+        for ins in instruments:
+            labels_rows.append((ins, d, rng.normal()))
+    labels = pd.DataFrame(labels_rows, columns=["instrument", "datetime", "label"])
+
+    def make(cor):
+        rows = []
+        for _, r in labels.iterrows():
+            rows.append((r["instrument"], r["datetime"], cor * r["label"] + (1 - cor) * rng.normal()))
+        return rank_normalize_daily(pd.DataFrame(rows, columns=["instrument", "datetime", "score"]))
+
+    scores_by_fold = []
+    for fidx in fold_ids:
+        fdates = dates[fidx]
+        scores_by_fold.append({
+            "lgb": make(0.1),
+            "master": make(0.25),
+            "mixer": make(0.05),
+        })
+        scores_by_fold[-1] = {m: df[df["datetime"].isin(fdates)] for m, df in scores_by_fold[-1].items()}
+
+    res = select_lambda_loo(
+        scores_by_fold, labels,
+        lam_grid=[0.0, 0.1, 0.5, 1.0],
+        model_order=["lgb", "master", "mixer"],
+        seed=7,
+    )
+    assert res["lambda"] in [0.0, 0.1, 0.5, 1.0]
+    assert len(res["per_fold_icir"]) == 3
+
+
+def test_bootstrap_weights_reports_ci():
+    from code.src.ensemble.blender import bootstrap_weights, rank_normalize_daily
+    rng = np.random.default_rng(11)
+    n_days, n_stocks = 40, 50
+    dates = pd.date_range("2025-01-01", periods=n_days)
+    instruments = [f"s{i:03d}" for i in range(n_stocks)]
+    labels_rows = []
+    for d in dates:
+        for ins in instruments:
+            labels_rows.append((ins, d, rng.normal()))
+    labels = pd.DataFrame(labels_rows, columns=["instrument", "datetime", "label"])
+
+    def make(cor):
+        rows = []
+        for _, r in labels.iterrows():
+            rows.append((r["instrument"], r["datetime"], cor * r["label"] + (1 - cor) * rng.normal()))
+        return rank_normalize_daily(pd.DataFrame(rows, columns=["instrument", "datetime", "score"]))
+
+    scores = {"lgb": make(0.1), "master": make(0.2), "mixer": make(0.05)}
+    res = bootstrap_weights(scores, labels, lam=0.2, model_order=["lgb", "master", "mixer"], n=40, seed=11)
+    for m in ["lgb", "master", "mixer"]:
+        assert res["ci_low"][m] <= res["median"][m] <= res["ci_high"][m]

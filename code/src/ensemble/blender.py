@@ -353,3 +353,60 @@ def optimize_weights_icir(
     w = w / w.sum()
     icir = -icir_objective(w, ranked_scores, labels, 0.0, model_order)  # 纯 ICIR，不含 KL
     return {"weights": dict(zip(model_order, w.tolist())), "icir": float(icir), "neg_objective": float(best.fun)}
+
+
+def select_lambda_loo(
+    scores_by_fold: List[Dict[str, pd.DataFrame]],
+    labels: pd.DataFrame,
+    lam_grid: Sequence[float],
+    model_order: List[str],
+    seed: int = 42,
+) -> dict:
+    n_folds = len(scores_by_fold)
+    results = {}
+    for lam in lam_grid:
+        fold_icirs = []
+        for k in range(n_folds):
+            train_scores = {m: pd.concat([scores_by_fold[j][m] for j in range(n_folds) if j != k], ignore_index=True)
+                            for m in model_order}
+            opt = optimize_weights_icir(train_scores, labels, lam=lam, model_order=model_order, seed=seed)
+            w = opt["weights"]
+            holdout = scores_by_fold[k]
+            ics = compute_blend_ic_series(holdout, labels, w)
+            if len(ics) == 0:
+                continue
+            mean = float(np.mean(ics))
+            std = float(np.std(ics, ddof=1)) if len(ics) > 1 else 1e-6
+            fold_icirs.append(mean / (std + 1e-6) * np.sqrt(len(ics)))
+        results[float(lam)] = fold_icirs
+    mean_icirs = {lam: (float(np.mean(v)) if v else -np.inf) for lam, v in results.items()}
+    best_lam = max(mean_icirs, key=mean_icirs.get)
+    return {"lambda": best_lam, "mean_icir": mean_icirs[best_lam], "per_fold_icir": results[best_lam], "all": mean_icirs}
+
+
+def bootstrap_weights(
+    ranked_scores: Dict[str, pd.DataFrame],
+    labels: pd.DataFrame,
+    lam: float,
+    model_order: List[str],
+    n: int = 1000,
+    seed: int = 42,
+) -> dict:
+    rng = np.random.default_rng(seed)
+    all_dates = np.array(sorted(next(iter(ranked_scores.values()))["datetime"].unique()))
+    samples = {m: [] for m in model_order}
+    for _ in range(n):
+        sampled = rng.choice(all_dates, size=len(all_dates), replace=True)
+        mask = pd.Series(sampled).value_counts()  # date -> count
+        sub_scores = {m: df[df["datetime"].isin(mask.index)] for m, df in ranked_scores.items()}
+        sub_labels = labels[labels["datetime"].isin(mask.index)]
+        try:
+            opt = optimize_weights_icir(sub_scores, sub_labels, lam=lam, model_order=model_order, seed=int(rng.integers(1, 1 << 30)), n_dirichlet=3)
+            for m in model_order:
+                samples[m].append(opt["weights"][m])
+        except Exception:
+            continue
+    median = {m: float(np.median(samples[m])) if samples[m] else float("nan") for m in model_order}
+    ci_low = {m: float(np.quantile(samples[m], 0.025)) if samples[m] else float("nan") for m in model_order}
+    ci_high = {m: float(np.quantile(samples[m], 0.975)) if samples[m] else float("nan") for m in model_order}
+    return {"median": median, "ci_low": ci_low, "ci_high": ci_high, "n_success": len(samples[model_order[0]])}
