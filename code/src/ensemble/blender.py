@@ -245,3 +245,68 @@ def _self_test() -> None:
 
 if __name__ == "__main__":
     _self_test()
+
+
+# ============================================================
+# ICIR-based robust ensemble (v2, 2026-04-23)
+# ============================================================
+from typing import Dict, List, Sequence
+from scipy.stats import spearmanr
+
+
+def rank_normalize_daily(df: pd.DataFrame, score_col: str = "score") -> pd.DataFrame:
+    out = df.copy()
+    def _norm(s):
+        r = s.rank(method="average")
+        return (r - 0.5) / len(r)
+    out[score_col] = out.groupby("datetime")[score_col].transform(_norm)
+    return out
+
+
+def compute_blend_ic_series(
+    ranked_scores: Dict[str, pd.DataFrame],
+    labels: pd.DataFrame,
+    weights: Dict[str, float],
+) -> np.ndarray:
+    names = list(weights.keys())
+    merged = None
+    for m in names:
+        df = ranked_scores[m][["instrument", "datetime", "score"]].rename(columns={"score": f"s_{m}"})
+        merged = df if merged is None else merged.merge(df, on=["instrument", "datetime"], how="inner")
+    merged = merged.merge(labels, on=["instrument", "datetime"], how="inner")
+    merged["blend"] = sum(weights[m] * merged[f"s_{m}"] for m in names)
+    ics = []
+    for _, g in merged.groupby("datetime"):
+        if len(g) < 3:
+            continue
+        rho, _ = spearmanr(g["blend"], g["label"])
+        ics.append(0.0 if np.isnan(rho) else rho)
+    return np.asarray(ics, dtype=float)
+
+
+def _kl_to_uniform(w: Sequence[float]) -> float:
+    w = np.asarray(w, dtype=float)
+    n = len(w)
+    uniform = 1.0 / n
+    mask = w > 1e-12
+    return float(np.sum(w[mask] * np.log(w[mask] / uniform)))
+
+
+def icir_objective(
+    weights: Sequence[float],
+    ranked_scores: Dict[str, pd.DataFrame],
+    labels: pd.DataFrame,
+    lam: float,
+    model_order: List[str],
+    eps: float = 1e-6,
+) -> float:
+    """返回 -J(w) = -(ICIR − λ·KL)，供 SLSQP 最小化。"""
+    w = {m: float(weights[i]) for i, m in enumerate(model_order)}
+    ics = compute_blend_ic_series(ranked_scores, labels, w)
+    if len(ics) == 0:
+        return 0.0
+    mean = float(np.mean(ics))
+    std = float(np.std(ics, ddof=1)) if len(ics) > 1 else eps
+    icir = mean / (std + eps) * np.sqrt(len(ics))
+    kl = _kl_to_uniform(list(weights))
+    return -(icir - lam * kl)
