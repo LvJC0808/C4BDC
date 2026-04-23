@@ -59,6 +59,24 @@ def build_portfolio(
     return out.reset_index(drop=True)
 
 
+def deterministic_top_k(
+    df: pd.DataFrame,
+    k: int = 5,
+    score_col: str = "score",
+    id_col: str = "stock_id",
+    quantize: float = 1e-4,
+) -> pd.DataFrame:
+    """Select a deterministic top-k slice with quantized score tie-breaking."""
+    out = df.copy()
+    out["score_q"] = (out[score_col] / quantize).round() * quantize
+    out = out.sort_values(
+        by=["score_q", id_col],
+        ascending=[False, True],
+        kind="mergesort",
+    )
+    return out.head(k).reset_index(drop=True)
+
+
 def grid_search_portfolio_params(
     blended_scores_panel: pd.DataFrame,
     labels: pd.DataFrame,
