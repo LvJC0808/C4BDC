@@ -82,89 +82,200 @@ pyproject.toml 中 torch 移到 `[project.optional-dependencies] legacy`。
 | `readme.md` | 改写算法章节 |
 | `legacy/` | 新建，移入 master/stockmixer + README |
 
-## 8. 4060 实测方案
+## 8. 4060 真机实测方案
 
-### 8.1 在 5090 上模拟 4060 约束
+我们已确认有真实 RTX 4060 硬件。以下 T1–T8 测试矩阵按优先级执行，产出数据写入 `docs/findings/2026-04-23-4060-validation.md`。
 
-无需真 4060 硬件即可验证最关键的约束：
+### 8.0 4060 机器初始化检查
 
 ```bash
-# 模拟 8 GB 显存限制（LGB 不用 GPU，这步实际验证特征工程是否碰 GPU）
-CUDA_VISIBLE_DEVICES="" python scripts/train_lgb_only.py
+# 硬件自检
+nvidia-smi --query-gpu=name,driver_version,memory.total,memory.free --format=csv
+# 期望：NVIDIA GeForce RTX 4060, driver ≥ 530, memory.total ≥ 8000 MiB
 
-# 模拟 16 GB RAM（用 cgroups 限制内存）
-systemd-run --scope -p MemoryMax=16G -p MemorySwapMax=0 \
-    python scripts/train_lgb_only.py
+lscpu | grep -E "Model name|CPU\(s\):|Thread"
+# 期望：i7-13650H 或同级 (≥ 10 cores)
 
-# 模拟 CPU 性能（i7-13650H 约 6 P-core + 8 E-core）
-# 限制到 6 线程模拟 4060 机器
-LGB_NUM_THREADS=6 taskset -c 0-5 python scripts/train_lgb_only.py
+free -g                 # 期望 total ≥ 16 GB
+df -h /                 # 期望剩余 ≥ 50 GB
+
+python3 --version       # 期望 3.12.x
+which uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+
+cd /path/to/THU-BDC2026
+uv sync                 # 5–10 min
 ```
 
-三者组合的全约束模拟命令：
+### 8.1 测试矩阵
+
+| ID | 场景 | 通过条件 |
+|---|---|---|
+| T1 | venv train | ≤ 30 min, 无 OOM, 产出 checkpoint |
+| T2 | venv predict | ≤ 1 min, result.csv 合规 |
+| T3 | 同机复现 | Top-5 一致, 权重 diff ≤ 1e-6 |
+| T4 | Docker 端到端 | 镜像 ≤ 2 GB, 总时长 ≤ 8h + 5min |
+| T5 | 跨机 Top-5 一致 | 4060 vs 5090 交集 ≥ 4/5, w diff ≤ 0.01 |
+| T6 | LGB bit-level | `LGB_NUM_THREADS=1` 下两次 checkpoint MD5 一致 |
+| T7 | 显存旁路监控 | GPU mem peak ≤ 50 MiB（证明不碰 GPU） |
+| T8 | legacy 三模型对照 | 预期 OOM 或超时，佐证 Path B 必要性 |
+
+### 8.2 T1：venv train + 资源监控
 
 ```bash
-CUDA_VISIBLE_DEVICES="" LGB_NUM_THREADS=6 \
-systemd-run --scope -p MemoryMax=16G -p MemorySwapMax=0 \
-taskset -c 0-5 \
-/root/shared-nvme/bigdata/THU-BDC2026/.venv/bin/python scripts/train_lgb_only.py
+nvidia-smi dmon -s um -o DT > /tmp/4060_gpu_train.log &
+GPU_MON=$!
+
+/usr/bin/time -v .venv/bin/python scripts/train_lgb_only.py 2>&1 \
+    | tee temp/4060_train.log
+
+kill $GPU_MON
+
+grep -E "Maximum resident|Elapsed.*wall" temp/4060_train.log
+awk '{print $4}' /tmp/4060_gpu_train.log | sort -nr | head -1
 ```
 
-验证点：
-1. 训练完成，无 OOM
-2. 耗时 ≤ 8h（实际应 ≤ 30 min）
-3. 产出 checkpoint 可正常 predict
-
-### 8.2 Docker 内端到端（最接近赛方环境）
+### 8.3 T2：predict + 格式校验
 
 ```bash
-# 构建镜像
+/usr/bin/time -v .venv/bin/python scripts/predict_lgb_only.py 2>&1 \
+    | tee temp/4060_predict.log
+
+.venv/bin/python -c "
+import pandas as pd
+df = pd.read_csv('output/result.csv')
+assert len(df) <= 5
+assert df['weight'].sum() <= 1.0 + 1e-6
+assert list(df.columns) == ['stock_id', 'weight']
+print('OK', df.to_dict('records'))
+"
+```
+
+### 8.4 T3：同机复现
+
+```bash
+# Run 1
+.venv/bin/python scripts/train_lgb_only.py
+.venv/bin/python scripts/predict_lgb_only.py
+cp output/result.csv temp/result_run1.csv
+
+# 清缓存保证不泄漏
+rm -rf temp/*.parquet model_lgb_only
+
+# Run 2
+.venv/bin/python scripts/train_lgb_only.py
+.venv/bin/python scripts/predict_lgb_only.py
+cp output/result.csv temp/result_run2.csv
+
+.venv/bin/python code/src/verify_reproducibility.py \
+    --a temp/result_run1.csv --b temp/result_run2.csv
+```
+
+### 8.5 T4：Docker 端到端
+
+```bash
 docker buildx build --platform linux/amd64 -t bdc2026 .
+docker images bdc2026 --format "{{.Size}}"       # ≤ 2 GB
 
-# 模拟赛方流程
-docker compose up   # 依次跑 init.sh → train.sh → test.sh
-
-# 挂载 data/、output/、temp/，和赛方 docker-compose.yml 完全一致
-# 验证 output/result.csv 存在且格式正确
+docker compose up 2>&1 | tee temp/4060_docker.log
+ls -la output/result.csv
 ```
 
-Docker 内自动获得：
-- 固定 OS（debian bookworm）
-- 固定 Python/包版本（uv.lock 锁定）
-- 无 GPU（镜像内没 torch，LGB 用 CPU）
+### 8.6 T5：跨机 Top-5 一致（最关键）
 
-这是**最接近赛方复现环境的测试**，优先级高于真 4060 硬件。
-
-### 8.3 队友 4060 真机验证
-
-如果队友有 4060 台式机（赛规硬件 i7-13650H / 16GB / 4060 8GB）：
+在 5090 上跑一次并保留产出：
 
 ```bash
-# 1. 传输镜像
-scp bdc2026.tar mate@192.168.x.x:~/
-# 在 mate 机器上
-docker load -i bdc2026.tar
-docker compose up
-
-# 2. 收集产出
-scp mate@192.168.x.x:~/output/result.csv ./test/result_4060.csv
-
-# 3. 比对
-python code/src/verify_reproducibility.py \
-    --cross output/result.csv test/result_4060.csv
+# 5090
+.venv/bin/python scripts/train_lgb_only.py
+.venv/bin/python scripts/predict_lgb_only.py
+cp output/result.csv /tmp/result_5090.csv
 ```
 
-验证点：
-1. Top-5 一致（tie-break 生效）
-2. 权重 diff ≤ 0.01
-3. 训练 ≤ 8h，推理 ≤ 5 min
+传到 4060 再跑：
 
-### 8.4 无真 4060 时的替代
+```bash
+# 4060
+scp user@5090-host:/tmp/result_5090.csv /tmp/result_5090.csv
+.venv/bin/python scripts/train_lgb_only.py
+.venv/bin/python scripts/predict_lgb_only.py
+cp output/result.csv /tmp/result_4060.csv
 
-如果无法获得真 4060：
-- 8.1 + 8.2 组合已覆盖 90% 风险（LGB CPU-only，无 CUDA 依赖）
-- 队友已有 Linux/Windows 4060 产出的 val_scores 和 refit checkpoint，可直接跑 predict 比对
-- 剩余 10% 风险：不同 CPU 微架构的浮点 reduction 差异，被 tie-break 量化消化
+.venv/bin/python code/src/verify_reproducibility.py \
+    --cross /tmp/result_5090.csv /tmp/result_4060.csv
+```
+
+### 8.7 T6：极端 bit-level 复现
+
+```bash
+LGB_NUM_THREADS=1 .venv/bin/python scripts/train_lgb_only.py
+md5sum model_lgb_only/lgb/seed_42_refit/sub_*.txt > /tmp/md5_run1.txt
+
+rm -rf model_lgb_only temp/*.parquet
+
+LGB_NUM_THREADS=1 .venv/bin/python scripts/train_lgb_only.py
+md5sum model_lgb_only/lgb/seed_42_refit/sub_*.txt > /tmp/md5_run2.txt
+
+diff /tmp/md5_run1.txt /tmp/md5_run2.txt         # 期望无输出
+```
+
+如果 diff 有输出，说明还有非确定性源头（典型：TA-Lib 并行），需要加 `OMP_NUM_THREADS=1` 进一步排查。
+
+### 8.8 T7：训练时 GPU 显存监控
+
+```bash
+.venv/bin/python scripts/train_lgb_only.py &
+TRAIN_PID=$!
+while kill -0 $TRAIN_PID 2>/dev/null; do
+    nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits
+    sleep 5
+done > /tmp/gpu_mem_samples.txt
+sort -nr /tmp/gpu_mem_samples.txt | head -3
+# 期望 peak ≤ 50 MiB；偏高说明有意外的 CUDA 初始化
+```
+
+### 8.9 T8：legacy 三模型对照（故意失败）
+
+目的是产生"MASTER 在 4060 上跑不完"的实测证据，不是让它跑通。
+
+```bash
+uv pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+timeout 3h ENSEMBLE_METHOD=legacy .venv/bin/python -m code.src.pipeline train \
+    --data_path ./data --model_dir ./model --temp_dir ./temp \
+    2>&1 | tee temp/4060_legacy.log
+
+grep -iE "out of memory|killed|cuda error" temp/4060_legacy.log
+tail -30 temp/4060_legacy.log
+```
+
+### 8.10 决策树
+
+- **T1–T4 全绿** → LGB-only 主提交方案确定，直接打包镜像提交
+- **T3 失败** → 有非确定性源头，跑 T6；如果 T6 也失败，排查 TA-Lib / numpy / scipy 并行
+- **T5 失败（Top-5 不一致）** → quantize 从 1e-4 调到 1e-3
+- **T5 权重 diff > 0.01** → 改用 `num_threads=1` 强化训练（慢 3×，仍远低于 8h）
+- **T7 > 100 MiB** → grep 排查意外的 `import torch` / `import cupy`
+- **T8 能跑完** → 意外，反向更新 Path B 结论
+
+### 8.11 数据收集模板
+
+跑完后把下表填入 `docs/findings/2026-04-23-4060-validation.md`：
+
+| Test | Status | 实测值 | 赛规上限 |
+|---|---|---|---|
+| T1 train wall time | ✅/❌ | ?? min | 8 h |
+| T1 RAM peak | ✅/❌ | ?? GB | 16 GB |
+| T1 GPU mem peak | ✅/❌ | ?? MiB | 8 GB |
+| T2 predict wall time | ✅/❌ | ?? s | 5 min |
+| T3 same-machine Top-5 | ✅/❌ | — | 100% |
+| T3 same-machine w diff | ✅/❌ | ?? | ≤ 1e-6 |
+| T4 docker image size | ✅/❌ | ?? GB | 10 GB |
+| T4 docker end-to-end | ✅/❌ | ?? min | 8h+5min |
+| T5 cross-machine Top-5 交集 | ✅/❌ | ?/5 | ≥ 4 |
+| T5 cross-machine w diff | ✅/❌ | ?? | ≤ 0.01 |
+| T6 bit-level md5 same | ✅/❌ | — | yes |
+| T7 GPU mem during train | ✅/❌ | ?? MiB | ≈ 0 |
+| T8 legacy status | 记录 | OOM / 超时 / 其他 | — |
 
 ## 9. 测试矩阵
 
