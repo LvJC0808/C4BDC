@@ -48,7 +48,7 @@ LGB_DE_ROUNDS = 3  # DoubleEnsemble iterations
 # MASTER
 MASTER_CONFIG = {
     "lookback": 8,
-    "d_model": int(os.environ.get("MASTER_D_MODEL", "256")),
+    "d_model": 256,
     "n_head": 4,
     "dropout": 0.5,
     "beta": 5,
@@ -58,6 +58,7 @@ MASTER_CONFIG = {
     "lr": 1e-4,
     "weight_decay": 1e-3,
     "patience": 10,
+    "min_epochs": 15,
     "loss_mse_w": 0.5,
     "loss_ic_w": 0.5,
     "loss_topk_w": 0.1,
@@ -74,6 +75,7 @@ MIXER_CONFIG = {
     "lr": 1e-4,
     "weight_decay": 1e-3,
     "patience": 10,
+    "min_epochs": 15,
 }
 
 # Ensemble

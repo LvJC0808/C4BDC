@@ -437,6 +437,8 @@ class MasterTrainer:
                 bad = 0
             else:
                 bad += 1
+                if epoch + 1 < self.config.get("min_epochs", 0):
+                    continue
                 if bad >= self.config["patience"]:
                     break
 

@@ -369,6 +369,8 @@ class MixerTrainer:
                     bad = 0
                 else:
                     bad += 1
+                    if epoch + 1 < cfg.get("min_epochs", 0):
+                        continue
                     if bad >= patience:
                         break
 

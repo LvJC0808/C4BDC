@@ -269,6 +269,11 @@ def cmd_train(args) -> None:
     refit_epochs: Dict[str, int] = {
         n: int(get_refit_epochs(best_iters[n])) for n in MODEL_NAMES
     }
+    _REFIT_FLOOR = {"lgb": 200, "master": 20, "mixer": 30}
+    for _n, _floor in _REFIT_FLOOR.items():
+        if _n in refit_epochs and refit_epochs[_n] < _floor:
+            print(f"[train] refit_epochs[{_n}]={refit_epochs[_n]} < floor {_floor}, raising")
+            refit_epochs[_n] = _floor
     print(f"[train] refit epochs: {refit_epochs}")
 
     # Full train range = [earliest, holdout_start - 1 - embargo]
