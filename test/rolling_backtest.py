@@ -126,10 +126,16 @@ def main() -> None:
                     help="Use rolling_ic_weights + blend_scores_dynamic.")
     ap.add_argument("--tradable_filter", action="store_true",
                     help="Per-date filter to tradable ids via get_tradable_ids.")
+    ap.add_argument("--ensemble_method", choices=["auto", "legacy", "icir_shrink"], default="auto",
+                    help="override ensemble_config.json['method']")
     args = ap.parse_args()
 
     set_global_seed(config.SEED)
     ens = _load_ensemble_cfg(args.model_dir)
+    if args.ensemble_method != "auto":
+        ens["method"] = args.ensemble_method
+        if args.ensemble_method == "legacy" and "legacy_weights" in ens:
+            ens["weights"] = ens["legacy_weights"]
     weights = ens["weights"]
     top_k = int(ens["top_k"])
     alpha = float(ens["alpha"])
