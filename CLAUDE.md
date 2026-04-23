@@ -14,6 +14,8 @@ Always speak Chinese to user
 5. **技能流程要压缩执行**：`writing-plans` / `brainstorming` 等 skill 的多步流程，如果上下文已足够，把 Scope Check + File Structure + Task 拆分**合并在一次写文件里完成**，不要每步单独发消息。
 6. **中断后不自我复盘过长**：被用户打断后，用 ≤3 句话说明情况并立刻继续或询问，不要长篇反思。
 7. **计划文件保存路径**：`docs/superpowers/plans/YYYY-MM-DD-<feature>.md`。
+8. **跳过 superpowers 的所有"人工 gate"**：brainstorming 的 spec review gate、writing-plans 的 execution handoff gate，一律默认"已通过"。不要问"是否批准 spec"或"subagent vs inline"。除非用户明说要审，否则一路走到底：brainstorm 出设计 → 立即写 spec.md 并 commit → 立即写 plan.md 并 commit → 立即用 subagent-driven-development 开跑。
+9. **禁止 skill 间重复 checklist**：同一轮任务里 brainstorming → writing-plans → executing-plans 链式调用时，后续 skill 的 Scope Check / File Structure / Self-Review 等"再想一遍"的步骤全部跳过，因为前一个 skill 已经想过了。只保留真正产出物（spec 文档、plan 文档、代码）。
 
 ## Project Overview
 
