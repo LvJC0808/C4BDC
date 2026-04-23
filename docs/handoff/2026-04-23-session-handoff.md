@@ -105,7 +105,7 @@
 ```
 
 ### ⚠️ 需要做的：
-1. **跑 pytest 确认 Task 1–7 单测通过**（pip install pytest 上次网络超时没装上）
+1. **跑 pytest 确认 Task 1–7 单测通过**（pip install pytest 上次网络超时没装上）（用户确认：刚刚已经安装好了）
 2. **git add + commit 全部变更**
 3. **跑端到端 smoke test**（train → predict → verify 全链路）
 
