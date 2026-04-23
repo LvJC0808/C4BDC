@@ -87,3 +87,9 @@ MIN_POSITION = 0.5
 # Sample pool filters
 MIN_LIST_DAYS = 250
 MAX_SUSPEND_DAYS = 5
+
+# ---- Ensemble v2 (ICIR robust) ----
+ENSEMBLE_METHOD = os.environ.get("ENSEMBLE_METHOD", "icir_shrink")  # "icir_shrink" | "legacy"
+ICIR_LAMBDA_GRID = [0.0, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0]
+ICIR_BOOTSTRAP_N = int(os.environ.get("ICIR_BOOTSTRAP_N", "1000"))
+ICIR_MULTI_START_DIRICHLET = 10

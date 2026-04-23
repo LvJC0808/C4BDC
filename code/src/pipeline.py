@@ -29,6 +29,8 @@ try:
     from .ensemble.blender import (
         blend_scores, grid_search_weights, rank_normalize,
         blend_scores_dynamic, rolling_ic_weights,
+        rank_normalize_daily, optimize_weights_icir,
+        select_lambda_loo, bootstrap_weights,
     )
     from .ensemble.portfolio import (
         compute_confidence, build_portfolio, grid_search_portfolio_params,
@@ -48,6 +50,8 @@ except ImportError:  # script-style
     from code.src.ensemble.blender import (  # type: ignore
         blend_scores, grid_search_weights, rank_normalize,
         blend_scores_dynamic, rolling_ic_weights,
+        rank_normalize_daily, optimize_weights_icir,
+        select_lambda_loo, bootstrap_weights,
     )
     from code.src.ensemble.portfolio import (  # type: ignore
         compute_confidence, build_portfolio, grid_search_portfolio_params,
@@ -321,6 +325,71 @@ def cmd_train(args) -> None:
         ["instrument", "datetime", "label"]
     ].copy()
 
+    # ---------------- v2: ICIR + KL shrink ---------------- #
+    if config.ENSEMBLE_METHOD == "icir_shrink":
+        scores_by_fold: List[Dict[str, pd.DataFrame]] = []
+        for split in plan.splits:
+            fold_dict: Dict[str, pd.DataFrame] = {}
+            for name in MODEL_NAMES:
+                parts = []
+                for seed in config.SEEDS:
+                    p = os.path.join(args.model_dir, name, f"seed_{seed}_fold_{split.fold}", "val_scores.parquet")
+                    if os.path.exists(p):
+                        parts.append(pd.read_parquet(p)[["instrument", "datetime", "score"]])
+                if not parts:
+                    continue
+                df = pd.concat(parts, ignore_index=True)
+                agg = df.groupby(["instrument", "datetime"])["score"].mean().reset_index()
+                fold_dict[name] = rank_normalize_daily(agg)
+            scores_by_fold.append(fold_dict)
+
+        holdout_fold: Dict[str, pd.DataFrame] = {
+            m: rank_normalize_daily(model_scores_mean[m]) for m in MODEL_NAMES
+        }
+        scores_by_fold.append(holdout_fold)
+
+        all_scores: Dict[str, pd.DataFrame] = {
+            m: pd.concat([f[m] for f in scores_by_fold if m in f], ignore_index=True)
+            for m in MODEL_NAMES
+        }
+
+        lam_res = select_lambda_loo(
+            scores_by_fold, ho_labels,
+            lam_grid=config.ICIR_LAMBDA_GRID,
+            model_order=list(MODEL_NAMES),
+            seed=config.SEED,
+        )
+        all_labels = lgb_panel[["instrument", "datetime", "label"]].copy()
+        opt_res = optimize_weights_icir(
+            all_scores, all_labels,
+            lam=lam_res["lambda"],
+            model_order=list(MODEL_NAMES),
+            seed=config.SEED,
+        )
+        boot_res = bootstrap_weights(
+            all_scores, all_labels,
+            lam=lam_res["lambda"],
+            model_order=list(MODEL_NAMES),
+            n=config.ICIR_BOOTSTRAP_N,
+            seed=config.SEED,
+        )
+        icir_weights = opt_res["weights"]
+        print(f"[train] ICIR lambda={lam_res['lambda']} weights={icir_weights} icir={opt_res['icir']:.3f}")
+        print(f"[train] bootstrap CI: {boot_res['ci_low']} .. {boot_res['ci_high']}")
+
+        blended_icir = blend_scores(all_scores, icir_weights)
+        port_best_icir = grid_search_portfolio_params(
+            blended_icir, ho_labels,
+            top_k_candidates=config.TOP_K_CANDIDATES,
+            alpha_candidates=config.POSITION_ALPHAS,
+        )
+    else:
+        icir_weights = None
+        lam_res = None
+        opt_res = None
+        boot_res = None
+        port_best_icir = None
+
     weight_best = grid_search_weights(model_scores_mean, ho_labels,
                                       top_k_list=config.TOP_K_CANDIDATES)
     print(f"[train] best weights: {weight_best}")
@@ -334,15 +403,33 @@ def cmd_train(args) -> None:
     )
     print(f"[train] best portfolio params: {port_best}")
 
-    ensemble_cfg = {
-        "weights": weight_best["weights"],
-        "top_k": int(port_best["top_k"] or weight_best["top_k"]),
-        "alpha": float(port_best["alpha"] or config.POSITION_ALPHAS[0]),
-        "refit_epochs": refit_epochs,
-        "feature_version": "v1.0",
-        "seeds": list(config.SEEDS),
-        "cv_folds": int(config.CV_FOLDS),
-    }
+    if config.ENSEMBLE_METHOD == "icir_shrink" and icir_weights is not None:
+        ensemble_cfg = {
+            "method": "icir_shrink",
+            "weights": icir_weights,
+            "legacy_weights": weight_best["weights"],
+            "lambda": lam_res["lambda"],
+            "icir": opt_res["icir"],
+            "ci_low": boot_res["ci_low"],
+            "ci_high": boot_res["ci_high"],
+            "top_k": int(port_best_icir["top_k"] or config.TOP_K_CANDIDATES[0]),
+            "alpha": float(port_best_icir["alpha"] or config.POSITION_ALPHAS[0]),
+            "refit_epochs": refit_epochs,
+            "feature_version": "v1.0",
+            "seeds": list(config.SEEDS),
+            "cv_folds": int(config.CV_FOLDS),
+        }
+    else:
+        ensemble_cfg = {
+            "method": "legacy",
+            "weights": weight_best["weights"],
+            "top_k": int(port_best["top_k"] or weight_best["top_k"]),
+            "alpha": float(port_best["alpha"] or config.POSITION_ALPHAS[0]),
+            "refit_epochs": refit_epochs,
+            "feature_version": "v1.0",
+            "seeds": list(config.SEEDS),
+            "cv_folds": int(config.CV_FOLDS),
+        }
     cfg_path = os.path.join(args.model_dir, "ensemble_config.json")
     with open(cfg_path, "w") as f:
         json.dump(ensemble_cfg, f, indent=2)
