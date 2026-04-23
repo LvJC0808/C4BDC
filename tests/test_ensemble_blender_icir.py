@@ -55,3 +55,36 @@ def test_icir_objective_equal_weight_kl_is_zero():
     val_zero_lam = icir_objective([1/3, 1/3, 1/3], scores, labels, lam=0.0, model_order=["lgb", "master", "mixer"])
     val_nonzero_lam = icir_objective([1/3, 1/3, 1/3], scores, labels, lam=1.0, model_order=["lgb", "master", "mixer"])
     assert abs(val_zero_lam - val_nonzero_lam) < 1e-9  # KL=0 at equal weight
+
+
+def test_optimize_weights_icir_favors_strong_signal_model():
+    """master 信号强 → w_master 应高于其他两者，但 KL 约束下 ≤ 0.7"""
+    from code.src.ensemble.blender import optimize_weights_icir, rank_normalize_daily
+    rng = np.random.default_rng(42)
+    n_days, n_stocks = 60, 80
+    dates = pd.date_range("2025-01-01", periods=n_days)
+    instruments = [f"s{i:03d}" for i in range(n_stocks)]
+    rows_label = []
+    for d in dates:
+        for ins in instruments:
+            rows_label.append((ins, d, rng.normal()))
+    labels = pd.DataFrame(rows_label, columns=["instrument", "datetime", "label"])
+
+    def make_scores(correlation):
+        rs = []
+        for _, row in labels.iterrows():
+            noise = rng.normal()
+            rs.append((row["instrument"], row["datetime"], correlation * row["label"] + (1 - correlation) * noise))
+        return rank_normalize_daily(pd.DataFrame(rs, columns=["instrument", "datetime", "score"]))
+
+    scores = {
+        "lgb": make_scores(0.05),
+        "master": make_scores(0.30),
+        "mixer": make_scores(0.02),
+    }
+    res = optimize_weights_icir(scores, labels, lam=0.2, model_order=["lgb", "master", "mixer"], seed=42)
+    w = res["weights"]
+    assert abs(sum(w.values()) - 1.0) < 1e-6
+    assert all(v >= -1e-9 for v in w.values())
+    assert w["master"] > w["lgb"] and w["master"] > w["mixer"]
+    assert w["master"] <= 0.70  # KL shrink 应把极端解拉回

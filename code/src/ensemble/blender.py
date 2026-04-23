@@ -310,3 +310,46 @@ def icir_objective(
     icir = mean / (std + eps) * np.sqrt(len(ics))
     kl = _kl_to_uniform(list(weights))
     return -(icir - lam * kl)
+
+
+from scipy.optimize import minimize
+
+
+def optimize_weights_icir(
+    ranked_scores: Dict[str, pd.DataFrame],
+    labels: pd.DataFrame,
+    lam: float,
+    model_order: List[str],
+    seed: int = 42,
+    n_dirichlet: int = 10,
+) -> dict:
+    rng = np.random.default_rng(seed)
+    n = len(model_order)
+    starts = [np.ones(n) / n] + [np.eye(n)[i] * 0.98 + (1 - 0.98) / n for i in range(n)]
+    starts += [rng.dirichlet(np.ones(n)) for _ in range(n_dirichlet)]
+    bounds = [(0.0, 1.0)] * n
+    cons = ({"type": "eq", "fun": lambda w: float(np.sum(w) - 1.0)},)
+
+    best = None
+    for x0 in starts:
+        try:
+            r = minimize(
+                icir_objective, x0=np.asarray(x0, dtype=float),
+                args=(ranked_scores, labels, lam, model_order),
+                method="SLSQP", bounds=bounds, constraints=cons,
+                options={"ftol": 1e-8, "maxiter": 200, "disp": False},
+            )
+            if not r.success and r.fun is None:
+                continue
+            if best is None or r.fun < best.fun:
+                best = r
+        except Exception:
+            continue
+    if best is None:
+        w = np.ones(n) / n
+        icir = -icir_objective(w, ranked_scores, labels, 0.0, model_order)
+        return {"weights": dict(zip(model_order, w)), "icir": float(icir), "neg_objective": 0.0}
+    w = np.clip(best.x, 0.0, None)
+    w = w / w.sum()
+    icir = -icir_objective(w, ranked_scores, labels, 0.0, model_order)  # 纯 ICIR，不含 KL
+    return {"weights": dict(zip(model_order, w.tolist())), "icir": float(icir), "neg_objective": float(best.fun)}
