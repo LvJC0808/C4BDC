@@ -7,11 +7,12 @@ RUN apt-get update && apt-get install -y \
     make \
     wget \
     tar \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ta-lib C library
-# Source: http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
+# Install ta-lib C library (GitHub mirror is more reliable from CN than sourceforge)
+RUN (wget --tries=3 --timeout=60 https://github.com/ta-lib/ta-lib/releases/download/v0.4.0/ta-lib-0.4.0-src.tar.gz \
+     || wget --tries=3 --timeout=60 http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz) && \
     tar -xzf ta-lib-0.4.0-src.tar.gz && \
     cd ta-lib && \
     ./configure --prefix=/usr && \
@@ -29,8 +30,11 @@ WORKDIR /app
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies for the lean mainline runtime
-RUN uv sync --frozen --no-install-package torch
+# Install dependencies (torch removed from uv.lock — see pyproject.toml)
+# Use Aliyun PyPI mirror + 10 min timeout for large wheels under CN network.
+ENV UV_HTTP_TIMEOUT=600
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+RUN uv sync --frozen
 
 # Copy the application code
 COPY . .

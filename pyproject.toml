@@ -23,4 +23,5 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-legacy = ["torch>=2.6.0"]
+# torch removed from submission image — saves ~4 GB CUDA wheels.
+# Install manually if needed: uv pip install "torch>=2.6.0"
