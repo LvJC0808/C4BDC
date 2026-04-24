@@ -12,7 +12,8 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from code.src import config
-from code.src.ensemble.portfolio import deterministic_top_k
+from code.src.ensemble.portfolio import deterministic_top_k, mcap_constrained_topk
+from code.src.ensemble.regime import detect_regime
 from code.src.ensemble.allocation import allocate_by_mode
 from code.src.features.build import build_feature_sets
 from code.src.pipeline import _ensure_dirs, _load_model, _predict_scores, _sorted_union_dates
@@ -75,6 +76,41 @@ def main() -> None:
         score_col="score",
         id_col="stock_id",
     )[["stock_id", "score_q"]].copy()
+
+    mcap_min_large = int(os.environ.get("MCAP_MIN_LARGE", "0"))
+    mcap_cand_k = int(os.environ.get("MCAP_CAND_K", "10"))
+    mcap_large_q = float(os.environ.get("MCAP_LARGE_Q", "0.5"))
+    if mcap_min_large > 0 and "log_mktcap" in today_panel.columns:
+        scores_for_pick = avg_scores.rename(columns={"instrument": "stock_id"})
+        mktcap_snap = today_panel[["instrument", "log_mktcap"]].rename(
+            columns={"instrument": "stock_id"}
+        )
+        picks = mcap_constrained_topk(
+            scores_for_pick, mktcap_snap,
+            k=top_k, candidate_k=mcap_cand_k,
+            min_large_cap=mcap_min_large,
+            large_cap_quantile=mcap_large_q,
+        )[["stock_id", "score_q"]].copy()
+        print(f"[lgb-only] mcap_constrained Top-{top_k} "
+              f"(min_large={mcap_min_large}, cand_k={mcap_cand_k}, q={mcap_large_q})",
+              file=sys.stderr)
+
+    try:
+        close_col = "close" if "close" in panel.columns else (
+            "$close" if "$close" in panel.columns else None
+        )
+        if close_col and "log_mktcap" in panel.columns:
+            p_slim = panel[["datetime", "instrument", close_col, "log_mktcap"]].rename(
+                columns={close_col: "close"}
+            )
+            reg = detect_regime(p_slim, as_of=target_date)
+            print(f"[lgb-only] regime={reg['regime']} diff={reg['diff']:+.4f} "
+                  f"r_large={reg['r_large']:+.4f} r_small={reg['r_small']:+.4f}",
+                  file=sys.stderr)
+        else:
+            print("[lgb-only] regime=unavailable (no close/log_mktcap col)", file=sys.stderr)
+    except Exception as e:
+        print(f"[lgb-only] regime detection failed: {e}", file=sys.stderr)
 
     if picks.empty:
         result = pd.DataFrame(columns=["stock_id", "weight"])
