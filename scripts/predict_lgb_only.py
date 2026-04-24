@@ -13,6 +13,7 @@ sys.path.insert(0, str(REPO))
 
 from code.src import config
 from code.src.ensemble.portfolio import deterministic_top_k
+from code.src.ensemble.allocation import allocate_by_mode
 from code.src.features.build import build_feature_sets
 from code.src.pipeline import _ensure_dirs, _load_model, _predict_scores, _sorted_union_dates
 
@@ -78,23 +79,8 @@ def main() -> None:
     if picks.empty:
         result = pd.DataFrame(columns=["stock_id", "weight"])
     else:
-        # Linear weighting: shift to non-negative (min-to-zero), normalize to sum=1.
-        # Floor 5% per pick to avoid degeneracy when scores are nearly equal.
-        s = picks["score_q"].astype(float)
-        w = s - s.min()
-        if w.sum() > 1e-12:
-            w = w / w.sum()
-            # Floor + renormalize to keep diversification
-            floor = 0.05
-            w = w.clip(lower=floor)
-            w = w / w.sum()
-        else:
-            w = pd.Series([1.0 / len(picks)] * len(picks), index=picks.index)
-        picks["weight"] = w.round(6).values
-        # Fix rounding residual into largest weight to preserve sum==1.0
-        residual = 1.0 - picks["weight"].sum()
-        picks.loc[picks["weight"].idxmax(), "weight"] += residual
-        result = picks[["stock_id", "weight"]]
+        alloc_mode = os.environ.get("ALLOC_MODE", "equal")
+        result = allocate_by_mode(picks, alloc_mode)[["stock_id", "weight"]]
 
     result.to_csv(OUTPUT_PATH, index=False)
     print(f"[lgb-only] wrote {OUTPUT_PATH} ({len(result)} rows)")
