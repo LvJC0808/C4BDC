@@ -31,13 +31,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 # Copy dependency files
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock requirements-submission.txt ./
 
-# Install dependencies (torch removed from uv.lock — see pyproject.toml)
-# Use Aliyun PyPI mirror + 10 min timeout for large wheels under CN network.
+# Install dependencies using the EXACT frozen versions from the golden 5090 .venv
+# (pyproject.toml/uv.lock kept for local dev; requirements-submission.txt is SSOT for image).
 ENV UV_HTTP_TIMEOUT=600
 ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-RUN uv sync --frozen
+RUN uv venv /app/.venv && \
+    uv pip install --python /app/.venv/bin/python -r requirements-submission.txt
 
 # Copy the application code
 COPY . .
