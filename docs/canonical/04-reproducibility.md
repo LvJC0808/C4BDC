@@ -107,20 +107,22 @@ result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")
 
 ## 4. 已知剩余风险
 
-### 4.1 CPU 指令集（AVX-512）
+### 4.1 跨节点 MD5 漂移（原因未完全定位）
 
-**现象**：
-- 主机 5090 + 队友 4060 × 2 节点：**都有 AVX-512 → golden MD5** `f13034946...`
-- 你本机 VM（i9-13900HX）：**无 AVX-512 → 不同 MD5** `5e8b8b0f...`
+**已观测的现象（项目内可查）**：
+- 主机 5090（Xeon Gold 6530）+ Linux 队友（i7-13700H）+ Windows 队友（CPU 型号未记录）：三节点 MD5 均为 golden `f13034946...`
+- 早期本机 VM 曾观测到不同 MD5 `5e8b8b0f...`（具体 commit 与镜像构建条件未完整记录）
 
-**解读**：
+**未验证的因果假说**（保留备查，**不作为已证事实**）：
 - LightGBM 在不同 SIMD 路径（AVX-512 vs AVX2）下浮点累加顺序可能不同
-- 罕见情况下差异能放大到 `1e-2` 级，改变 Top-K 选股
-- **我们 deterministic_top_k 的 quantize=1e-4 无法吸收这种大差异**
+- 包版本次级差异（pandas/numpy/lightgbm build）可能导致浮点尾差
+- 早期未强制 LF 行尾 / Docker 镜像 `uv sync` 解析到不同次版本
 
-**缓解**：
-- 赛方评测机是数据中心 Xeon → **几乎必有 AVX-512**
-- 我们在 AVX-512 Linux 机器上打 tar → 赛方机器跑出的 result.csv 会是 `f130349...`
+**说明**：以上假说**未在本项目内做过控制变量实验**。当时 VM 的 MD5 差异可能由上述任一或多个因素叠加产生；在包版本锁定（commit `2599904`）与 LF 强制（commit `42abc7f`）之后，三节点实测一致，但未回头在 VM 上重测。
+
+**缓解（当前采用）**：
+- 以**已复现 golden MD5** 的队友节点（Linux i7-13700H / Windows 4060）作为最终打包节点
+- 赛规 PDF 明确赛方评测机为 i7-13650H，与 Linux 队友同为 13 代 Intel 移动端；但**赛方能否复现本项目内未做直接实测**，仍属残留风险
 - 详见 `docs/handoff/2026-04-25-w1-build-linux.md` §2.3
 
 ### 4.2 Python 包版本漂移
@@ -180,12 +182,12 @@ result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")
 
 ## 8. 验证清单（每次 W* 提交前必做）
 
-### 8.1 打包节点（Linux AVX-512 队友）
+### 8.1 打包节点（已验证 MD5 一致的 Linux 队友节点）
 
 - [ ] `git pull` 确认最新 commit
 - [ ] `md5sum data/stock_data.csv` = `cf3e0526f3d832b2ea2e3f1dc22c52e9`
 - [ ] `md5sum model_lgb_only/lgb/seed_42_refit/sub_0.txt` = `c517168b...`
-- [ ] CPU 有 `avx512f`
+- [ ] 记录 CPU 型号与 `avx*` flags（仅存档，不作阻断）
 - [ ] `docker buildx build` 成功，镜像 < 10 GB
 - [ ] 本机场景 A（完整 data）→ result.csv MD5 = `f13034946c0aaea5cb1e3f2d0d6ad692`
 - [ ] 本机场景 B（train+test 模拟赛方）→ Top-5 一致

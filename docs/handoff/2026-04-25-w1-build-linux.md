@@ -9,10 +9,10 @@
 
 ## 0. 为什么需要你重 build
 
-- 你本机 CPU **支持 AVX-512**（今天早些时候已证明能复现 golden MD5 `f13034946...`）
+- 你本机已在 4-23 验证中复现过 golden MD5 `f13034946...`（见 `mates_issue/mate_linux/2026-04-23-4060-validation.md`）
 - 主开发机 Linux 5090 **没装 docker**（容器环境，PID 1 不是 systemd）
 - Windows 队友本机 docker daemon 也受限
-- **所以你的 AVX-512 Linux 是唯一能打出"本地自验一致"的打包节点**
+- **所以你的 Linux 4060 是目前唯一已验证 MD5 一致、且 docker 可用的打包节点**
 
 ---
 
@@ -57,16 +57,15 @@ md5sum model_lgb_only/lgb/seed_42_refit/sub_0.txt
 # 期望 c517168b73fe4bcb5ecbdb1f1dd2434e
 ```
 
-### 2.3 CPU 指令集（最关键）
+### 2.3 CPU 信息（仅记录，不作阻断）
 
 ```bash
-cat /proc/cpuinfo | grep -m1 flags | tr ' ' '\n' | grep -iE '^avx512' | sort -u
-# 期望至少看到 avx512f
+lscpu | grep -E 'Model name|Flags' | head -2
+cat /proc/cpuinfo | grep -m1 flags | tr ' ' '\n' | grep -iE '^avx' | sort -u
 ```
 
-**若无 avx512**：
-- **立刻停止**，发消息给主开发机
-- 可能需要换另一台机器，或直接用主机已 save 的 tar（有 AVX-512 差异风险）
+**记录输出即可**（例如 CPU 型号、是否有 avx2/avx512 等）。
+本项目尚未做控制变量实验验证 SIMD 指令集对 MD5 的影响，因此此项**不作为阻断条件**，只作为事后追溯信息。验收以 §4 场景 A 的 result.csv MD5 为准。
 
 ### 2.4 Docker 可用性
 
@@ -219,7 +218,7 @@ md5sum output/result.csv
 ```
 === W1 Build Report · Linux 4060 ===
 1. Git commit:     <hash>
-2. CPU avx512f:    YES / NO
+2. CPU (仅记录):  <model> / flags: <avx2 / avx512*? >
 3. Image size:     <GB>
 4. 场景 A MD5:     <md5>   (期望 f13034946c0aaea5cb1e3f2d0d6ad692)
 5. 场景 B MD5:     <md5>   (Top-5 匹配即可)
@@ -231,7 +230,7 @@ md5sum output/result.csv
 
 ---
 
-## 8. 上传夸克网盘（前面做完了，这一步交给主开发机）
+## 8. 上传夸克网盘（前面做完了之后，这一步交给主开发机，你跳过）
 
 > 赛规明确要求："上传至夸克网盘，并生成对应分享链接，确保永久有效，不要加提取码"
 
@@ -279,9 +278,9 @@ docker info | grep -i proxy   # 看 daemon 代理是否生效
 
 上传前记 MD5，上传后从网盘下载回来重新 md5sum 对比。
 
-### Q4 · 赛方评测机 CPU 无 AVX-512
+### Q4 · 赛方评测机与我们机器的 CPU 差异
 
-赛方是数据中心 Xeon，**几乎一定有 AVX-512**。即使没有，我们的 deterministic_top_k 在大部分情况能吸收差异。这是剩余的 1% 风险。
+赛规 PDF 明确赛方评测机为 i7-13650H。我们目前已验证 Linux 4060（i7-13700H）与 Windows 4060（CPU 型号未记录）都能复现 golden MD5。赛方机器能否复现，本项目内未做直接实测；但考虑 Docker 镜像锁定了 `requirements-submission.txt` + 强制 LF 行尾 + deterministic_top_k，跨节点一致性已有多层保障。这是剩余未完全消除的残留风险之一。
 
 ---
 
