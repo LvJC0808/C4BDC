@@ -118,7 +118,7 @@ def main() -> None:
         alloc_mode = os.environ.get("ALLOC_MODE", "equal")
         result = allocate_by_mode(picks, alloc_mode)[["stock_id", "weight"]]
 
-    result.to_csv(OUTPUT_PATH, index=False)
+    result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")
     print(f"[lgb-only] wrote {OUTPUT_PATH} ({len(result)} rows)")
 
 
