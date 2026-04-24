@@ -244,7 +244,7 @@ def main() -> None:
             tradable = get_tradable_ids(stock_df, T)
 
         port = build_portfolio(
-            today_blended[["instrument", "final_score"]].copy(),
+            today_blended[["instrument", "final_score", "datetime"]].copy(),
             conf, alpha, top_k, min_position=min_pos,
             tradable_ids=tradable,
         )
