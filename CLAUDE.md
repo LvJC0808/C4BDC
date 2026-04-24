@@ -214,3 +214,14 @@ export https_proxy="http://u-UE25Z3:tXGJgV92@10.255.128.102:3128"
 export http_proxy="http://u-UE25Z3:tXGJgV92@10.255.128.102:3128"
 export no_proxy="127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.paracloud.com,*.paratera.com,*.blsc.cn"
 ```
+
+## 赛方 Baseline · 权威记录（务必先读）
+
+判断"跑赢 baseline"前**必须**先读 `docs/reference/baseline-authoritative.md`。
+
+要点速查：
+- **赛方 baseline 代码** = `/root/shared-nvme/C4BD/THU-BDC2026-main/`（勿改）
+- **权重 MD5** = `d9c56a6a332c0fef08157ca7661a2acb`（与我们仓库 `model/60_158+39/best_model.pth` 一致）
+- **赛方 baseline 6 天均值** = **−0.881% / 5d**（永远固定 5-8 只金融蓝筹：600919/601658/601169/601939/601328/601916/601816 等）
+- **跑赢标准 = vs 赛方 baseline，不是 vs HS300 等权**
+- **当前最佳成绩（M10-3）** = +0.755% / 5d，比赛方 baseline 多 +1.64pp（6 天样本）
