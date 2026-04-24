@@ -43,6 +43,12 @@ RUN uv venv /app/.venv && \
 # Copy the application code
 COPY . .
 
+# Keep a read-only backup of bundled data so that, if the judges mount their own
+# data/ (with only train.csv/test.csv) over /app/data, init.sh can re-materialize
+# auxiliary CSVs (industry_map, hs300_history, csi300_index, stock_basic, trade_calendar)
+# and merge train.csv + test.csv into stock_data.csv.
+RUN cp -r /app/data /app/data_bundled
+
 # Ensure runtime directories exist
 RUN mkdir -p /app/model /app/output /app/temp
 
