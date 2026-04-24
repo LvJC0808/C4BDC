@@ -1,7 +1,7 @@
 # W1 重构建 & 提交指引 · Linux 4060 队友
 
 > **本轮目标**：重 build Docker 镜像 → 验证 → 导出 `LCF@NUDT.tar` → 上传夸克网盘
-> **依据 commit**：`2953494` 及之后（data self-heal 已加入 init.sh）
+> **依据 commit**：`ae3f129` 及之后（handoff 文档最新修订 + data self-heal）
 > **时间预算**：约 45 分钟（build 15 min + 验证 10 min + 上传 20 min）
 > **W1 提交截止**：2026-04-26 23:59
 
@@ -26,12 +26,14 @@ git pull
 git log --oneline -3
 ```
 
-**期望看到**：
+**期望看到（顶部 3 条，hash 可能随后续 docs-only commit 微调）**：
 ```
-2953494 fix(docker): data self-heal in init.sh + bundle full data backup
-299f492 fix(deps): pin pandas==2.3.3 numpy==2.2.6 to match golden 5090 .venv
-...
+ae3f129 docs: downgrade AVX-512 causal claim to unverified hypothesis; add editorial v2 PPT
+db328c1 docs(slides): update April_End_Report.pptx — Phase 1-4 naming + reduce line spacing
+ae6ee0d docs(canonical): SSOT bundle (7 files) replacing scattered reports
 ```
+
+**底线依赖**：必须包含 `2953494`（data self-heal）和 `2599904`（requirements-submission.txt）。
 
 ---
 
@@ -325,4 +327,4 @@ docker info | grep -i proxy   # 看 daemon 代理是否生效
 
 ---
 
-*文档版本 · 2026-04-25 · 对应 commit 2953494+*
+*文档版本 · 2026-04-25 · 对应 commit ae3f129+*
