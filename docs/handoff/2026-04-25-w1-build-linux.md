@@ -76,17 +76,7 @@ docker pull hello-world                       # daemon 网络通
 docker pull python:3.12-slim-bookworm         # 基础镜像能拉
 ```
 
-**若 pull 失败**：daemon 网络问题，配代理或镜像源：
-```bash
-sudo mkdir -p /etc/systemd/system/docker.service.d
-sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf <<EOF
-[Service]
-Environment="HTTP_PROXY=http://<你的代理>"
-Environment="HTTPS_PROXY=http://<你的代理>"
-EOF
-sudo systemctl daemon-reload
-sudo systemctl restart docker
-```
+**若 pull 失败**：daemon 网络问题，配代理或镜像源
 
 ---
 
@@ -241,7 +231,7 @@ md5sum output/result.csv
 
 ---
 
-## 8. 上传夸克网盘
+## 8. 上传夸克网盘（前面做完了，这一步交给主开发机）
 
 > 赛规明确要求："上传至夸克网盘，并生成对应分享链接，确保永久有效，不要加提取码"
 
