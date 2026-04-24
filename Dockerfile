@@ -1,3 +1,6 @@
+# Use Docker Hub directly. If CN network is slow, configure daemon registry-mirrors
+# in /etc/docker/daemon.json (e.g. docker.m.daocloud.io) or HTTP_PROXY in
+# /etc/systemd/system/docker.service.d/http-proxy.conf
 FROM python:3.12-slim-bookworm
 
 # Install build dependencies
@@ -21,7 +24,7 @@ RUN (wget --tries=3 --timeout=60 https://github.com/ta-lib/ta-lib/releases/downl
     cd .. && \
     rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
 
-# Install uv
+# Install uv (requires Docker daemon network access to ghcr.io)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Set working directory
