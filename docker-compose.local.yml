@@ -1,0 +1,24 @@
+# Local dry-run compose (no GPU required).
+# Usage (on any Linux/WSL without NVIDIA runtime):
+#   docker compose -f docker-compose.local.yml up
+# Output will be written to ./output/result.csv
+#
+# The submission-use compose is docker-compose.yml (GPU runtime).
+
+services:
+  app:
+    image: bdc2026:latest
+    pull_policy: never
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./temp:/app/temp
+    working_dir: /app
+    command: /bin/bash /app/test.sh
+    environment:
+      - MCAP_MIN_LARGE=3
+      - MCAP_CAND_K=10
+      - MCAP_LARGE_Q=0.5
+    mem_limit: 16g
+    memswap_limit: 16g
+    cpus: 8.0
