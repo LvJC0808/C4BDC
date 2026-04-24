@@ -41,7 +41,10 @@ def main() -> None:
     fcols = fset["feature_cols"]
 
     dates = _sorted_union_dates({"lgb": fset})
-    target_date = pd.Timestamp(dates.iloc[-1])
+    if os.environ.get("TARGET_DATE"):
+        target_date = pd.Timestamp(os.environ["TARGET_DATE"])
+    else:
+        target_date = pd.Timestamp(dates.iloc[-1])
     today_panel = panel[panel["datetime"] == target_date].copy()
     if today_panel.empty:
         raise RuntimeError(f"No LGB rows found for target date {target_date.date()}")
@@ -70,13 +73,28 @@ def main() -> None:
         k=top_k,
         score_col="score",
         id_col="stock_id",
-    )[["stock_id"]].copy()
+    )[["stock_id", "score_q"]].copy()
 
     if picks.empty:
         result = pd.DataFrame(columns=["stock_id", "weight"])
     else:
-        picks["weight"] = 1.0 / len(picks)
-        result = picks
+        # Linear weighting: shift to non-negative (min-to-zero), normalize to sum=1.
+        # Floor 5% per pick to avoid degeneracy when scores are nearly equal.
+        s = picks["score_q"].astype(float)
+        w = s - s.min()
+        if w.sum() > 1e-12:
+            w = w / w.sum()
+            # Floor + renormalize to keep diversification
+            floor = 0.05
+            w = w.clip(lower=floor)
+            w = w / w.sum()
+        else:
+            w = pd.Series([1.0 / len(picks)] * len(picks), index=picks.index)
+        picks["weight"] = w.round(6).values
+        # Fix rounding residual into largest weight to preserve sum==1.0
+        residual = 1.0 - picks["weight"].sum()
+        picks.loc[picks["weight"].idxmax(), "weight"] += residual
+        result = picks[["stock_id", "weight"]]
 
     result.to_csv(OUTPUT_PATH, index=False)
     print(f"[lgb-only] wrote {OUTPUT_PATH} ({len(result)} rows)")

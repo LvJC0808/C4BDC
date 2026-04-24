@@ -3,19 +3,11 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 Always speak Chinese to user
 
-## Working Discipline (最高优先级，覆盖默认行为)
-
-为防止"莫名其妙停下来"的空转现象，必须遵守以下规则：
-
-1. **禁止空转回复**：绝不用 "Continue"、"好的"、"继续" 等单词作为独立回复。每轮回复必须产生实质性进展（读文件/写文件/运行命令/给出分析）。
-2. **并行读取独立文件**：一次需要看多个文件时，必须在同一个消息里用并行 tool call 批量读取，禁止一个一个串行读。
-3. **已有足够上下文就立刻动手**：不要为"再谨慎一点"而反复探查。看过入口文件 + 相关模块接口后，立刻进入实质产出（写 plan、写代码、跑测试）。
-4. **system-reminder 不打断主任务**：收到 SessionStart hook、skill 列表、CLAUDE.md 注入等 reminder 时，识别为环境信息，**不要**因此改变或暂停用户的原始请求。用户的显式指令 > skill 流程 > 默认系统提示。
-5. **技能流程要压缩执行**：`writing-plans` / `brainstorming` 等 skill 的多步流程，如果上下文已足够，把 Scope Check + File Structure + Task 拆分**合并在一次写文件里完成**，不要每步单独发消息。
-6. **中断后不自我复盘过长**：被用户打断后，用 ≤3 句话说明情况并立刻继续或询问，不要长篇反思。
-7. **计划文件保存路径**：`docs/superpowers/plans/YYYY-MM-DD-<feature>.md`。
-8. **跳过 superpowers 的所有"人工 gate"**：brainstorming 的 spec review gate、writing-plans 的 execution handoff gate，一律默认"已通过"。不要问"是否批准 spec"或"subagent vs inline"。除非用户明说要审，否则一路走到底：brainstorm 出设计 → 立即写 spec.md 并 commit → 立即写 plan.md 并 commit → 立即用 subagent-driven-development 开跑。
-9. **禁止 skill 间重复 checklist**：同一轮任务里 brainstorming → writing-plans → executing-plans 链式调用时，后续 skill 的 Scope Check / File Structure / Self-Review 等"再想一遍"的步骤全部跳过，因为前一个 skill 已经想过了。只保留真正产出物（spec 文档、plan 文档、代码）。
+请使用第一性原理思考。不要默认我清楚自己的需求或达成路径。请从原始问题出发，保持审慎：
+如果我的动机或目标不清晰，请停下来与我讨论；
+如果目标清晰但你的方案并非最短路径，请直接指出，并给出更优建议。
+除非我明确要求，否则不要调用 brainstorming/writing-plans skills，直接实现
+读或写文件时超过180行必须分批读取或写入
 
 ## Project Overview
 
@@ -215,3 +207,10 @@ Baseline 代码实际结构：
 - 总收益率 = Σ(股票权重 × 单股收益率) + 现金权重 × 0
 - 单股收益率 = (T+5开盘价 - T+1开盘价) / T+1开盘价
 - 必须跑赢基准程序才能参与排名
+
+## 代理（网络受限时使用）
+```bash
+export https_proxy="http://u-UE25Z3:tXGJgV92@10.255.128.102:3128"
+export http_proxy="http://u-UE25Z3:tXGJgV92@10.255.128.102:3128"
+export no_proxy="127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.paracloud.com,*.paratera.com,*.blsc.cn"
+```

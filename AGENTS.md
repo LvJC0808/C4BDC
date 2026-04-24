@@ -2,9 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 Always speak Chinese to user
+
 请使用第一性原理思考。不要默认我清楚自己的需求或达成路径。请从原始问题出发，保持审慎：
 如果我的动机或目标不清晰，请停下来与我讨论；
 如果目标清晰但你的方案并非最短路径，请直接指出，并给出更优建议。
+除非我明确要求，否则不要调用 brainstorming/writing-plans skills，直接实现
+读或写文件时超过180行必须分批读取或写入
 
 ## Project Overview
 
