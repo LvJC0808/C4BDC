@@ -1,6 +1,12 @@
-# THU-BDC2026 - LGB-only 主线方案
+# THU-BDC2026 - LGB-only 主线方案（W1 提交版）
 
-本 README 按 THU 大数据竞赛提交要求编写，说明环境、数据、训练、推理与复现性保障。当前主线是 **LGB-only**：训练与推理都只保留 LightGBM + DoubleEnsemble，入口由 `bash train.sh` 和 `bash test.sh` 调度到 `python scripts/train_lgb_only.py` 与 `python scripts/predict_lgb_only.py`。
+本 README 按 THU 大数据竞赛提交要求编写。当前主线是 **LGB-only + M10-3 防守补丁**：训练只保留 LightGBM + DoubleEnsemble × 3 seeds；推理增加"市值硬约束 Top-K"（`MCAP_MIN_LARGE=3`）。入口由 `bash train.sh` 与 `bash test.sh` 调度到 `scripts/train_lgb_only.py` 与 `scripts/predict_lgb_only.py`。
+
+**W1 提交元数据**：
+- 分支：`feat/ensemble-v1` · commit `77a8d61`
+- 提交日：2026-04-25
+- Top-5 持仓（target = 2026-04-23）：`300308, 600023, 688187, 688256, 002714`（各 0.2）
+- result.csv MD5：`f13034946c0aaea5cb1e3f2d0d6ad692`（本机双跑一致）
 
 ---
 
@@ -62,6 +68,24 @@
 - **DoubleEnsemble**（Han et al. 2020）：对困难样本重加权，提升 LGB 稳健性。
 - **中性化 + rank-gauss**：用 industry / log-mktcap / beta 做线性残差，对标签与特征 `rank -> Φ⁻¹` 高斯化。
 - **确定性推理**：最终 Top-5 由稳定的排序规则生成，避免浮点抖动改变提交文件。
+- **W1 · 市值硬约束 Top-K（M10-3）**：从 Top-10 候选中强制选出**至少 3 只大盘股**（log_mktcap ≥ HS300 中位数），对冲近期小盘 → 大盘风格轮动风险。实现见 `code/src/ensemble/portfolio.py::mcap_constrained_topk`。
+
+### 3.2 213 天 rolling 回测结果（2025-06-03 ~ 2026-04-16）
+
+| 指标 | **M10-3（提交）** | Baseline-LGB | HS300 等权 | Mom-TopK |
+|---|---|---|---|---|
+| Mean 5d return | **+2.95%** | +2.91% | +0.37% | +0.35% |
+| 胜率 (>0) | **87%** | 85% | 65% | 55% |
+| t-stat vs HS300 | **+12.0** | — | — | — |
+| 近 30 d Δ vs HS300 | **+0.38 pp** | +0.30 pp | — | — |
+
+### 3.3 对比赛方 baseline（6 天重叠，2026-04-01 ~ 04-09）
+
+| 档位 | mean 5d | 赛方 baseline | 超额 | 胜率 |
+|---|---|---|---|---|
+| **M10-3** | **+0.76%** | −0.88% | **+1.64 pp** | 5/6 (83%) |
+
+赛方 baseline（StockTransformer，权重 MD5 `d9c56a6a...`）永远固定押 5 大金融蓝筹（600919/601658/601169/601939/601328 等），6 天均值 −0.881%。
 
 ---
 
@@ -120,9 +144,22 @@
 入口：`bash test.sh` -> `python scripts/predict_lgb_only.py`。
 
 1. 读取最新 `/app/data`，构建与训练一致的特征。
-2. 加载 LGB refit checkpoint；对目标交易日截面打分。
-3. 采用上面的 Deterministic Top-5 规则选出 5 只股票。
-4. 五只股票等权 `0.2`，输出 `/app/output/result.csv`（`stock_id,weight`）。
+2. 加载 LGB refit checkpoint（`model_lgb_only/lgb/seed_{42,2024,7}_refit/`）；对目标交易日截面打分。
+3. 对 3 个 seed 的 score 取均值，作为融合后的最终 score。
+4. **Deterministic Top-10** 先取候选（quantize 1e-4 + stock_id 字典序 tie-break）。
+5. **Market-cap constrained 选 5**：从 Top-10 中贪心挑 5 只，强制大盘 ≥ `MCAP_MIN_LARGE`；若 Top-10 大盘不足则降级回原 Top-5。
+6. 五只股票等权 `0.2`，输出 `/app/output/result.csv`（`stock_id,weight`）。
+
+### 9.1 环境变量（`test.sh` 已设默认值）
+
+| 变量 | 默认值 | 含义 |
+|---|---|---|
+| `MCAP_MIN_LARGE` | `3` | Top-5 中大盘股最低数量（W1 提交值） |
+| `MCAP_CAND_K` | `10` | 候选池大小（Top-N 再做市值约束） |
+| `MCAP_LARGE_Q` | `0.5` | 大盘 log_mktcap 分位阈值（0.5 = 中位数） |
+| `TARGET_DATE` | 最新交易日 | 可选，覆盖预测目标日（YYYY-MM-DD） |
+
+设 `MCAP_MIN_LARGE=0` 可完全禁用防守补丁，行为退回原 Deterministic Top-5。
 
 ---
 
@@ -171,4 +208,56 @@ code/src/
 └── verify_reproducibility.py
 ```
 
-提交文件：`Dockerfile`、`init.sh`、`train.sh`、`test.sh`、`readme.md`、`code/`、`data/`、`model/`。
+提交文件：`Dockerfile`、`docker-compose.yml`、`init.sh`、`train.sh`、`test.sh`、`readme.md`、`code/`、`scripts/`、`data/`、`model/`（赛方 baseline 权重）、`model_lgb_only/`（LGB-only 主线权重）。
+
+---
+
+## 13. Docker 提交与运行
+
+### 13.1 构建镜像（本地）
+
+```bash
+docker buildx build --platform linux/amd64 \
+  --build-arg IMAGE_NAME=nvidia/cuda \
+  -t bdc2026 .
+```
+
+首次构建 ~15-25 分钟（主要是 TA-Lib C 库编译 + uv sync）。
+
+### 13.2 本地 dry-run 验证
+
+```bash
+docker compose up
+```
+
+`docker-compose.yml` 默认调用 `/app/test.sh`，会挂载当前 `./data`、`./output`、`./temp`，推理结束后在 `./output/result.csv` 看到结果。
+
+### 13.3 导出提交包
+
+```bash
+docker save -o <team_name>.tar bdc2026:latest
+ls -lh <team_name>.tar   # 应 < 10 GB
+```
+
+### 13.4 赛方加载与评测（供赛方参考）
+
+```bash
+docker load -i <team_name>.tar
+docker compose up   # 使用赛方自己的 docker-compose.yml 挂载评测数据
+cat output/result.csv
+```
+
+---
+
+## 14. 方法论文档索引
+
+详细的方法演化、失败实验与决策理由，见以下文档：
+
+| 文件 | 内容 |
+|---|---|
+| `docs/reports/2026-04-24-path-to-now-v2.md` | v2 阶段完整路径报告（3.15 → 4.24） |
+| `docs/reports/2026-04-24-w1-ab-decision.md` | W1 三档 AB（Baseline / M10-2 / M10-3）决策记录 |
+| `docs/reports/2026-04-24-stage-report.md` | 2026-04-24 阶段性日报（数据更新、Regime 诊断） |
+| `docs/reference/baseline-authoritative.md` | 赛方 baseline 权威记录（代码/权重 MD5/表现数据） |
+| `docs/superpowers/specs/2026-04-24-w1-defensive-patch-design.md` | W1 防守补丁设计 spec |
+| `docs/slides/2026-04-24-w1-defense.pptx` | 10 分钟答辩 PPT |
