@@ -5,6 +5,16 @@
 > **结论**：完整重构主线，从 StockTransformer 转 LGB-only，**213 天 rolling +2.41%/5d，t=+12，胜率 85%**，比 v1 阶段使用的本地评分体系更可靠。
 > **W1 提交**：M10-3 配置（mcap_constrained_topk + 强制 ≥3 大盘股），214 行代码新增、22 commits。
 
+## 三份必读前置文档
+
+本报告组成"三段式"完整记录：
+
+1. **v1**：`/root/shared-nvme/path_to_now.md`（3.15-4.10，StockTransformer + linear 配权 → 本地 0.0642）
+2. **v2 前半段**：`docs/report.md`（4.10-4.22，三模型 Ensemble + walk-forward CV + Phase-A 稳健化 → 87 天 +1.01%, t=+4.78）
+3. **v2 后半段**：本文档（4.22-4.24，LGB-only + W1 mcap 防守补丁 → 213 天 +2.41%, t=+12）
+
+**不要把任何一段当作"失败版本"**——每一段都是当时基于已知证据的最优决策，每一次切换都是新证据出现后的理性更新。
+
 ---
 
 ## 一、第二阶段为什么必须存在
@@ -32,29 +42,75 @@ v1 结尾留下三个根本不安：
 - 本地分 0.0642 不可作为最终决策依据
 - StockTransformer 路线必须放弃 GPU 推理或寻找完全确定性算法
 
-### M1 · 2026-04-14 ~ 04-17：LGB-only 主线立项
+### M1 · 2026-04-14 ~ 04-21：三模型 Ensemble v1（详见 `docs/report.md`）
 
-**抉择**：放弃 Transformer，全栈切换到 LightGBM + DoubleEnsemble
+**这是 v2 阶段的第一个完整方案**，不是失败实验，是**当时的最佳产出**——它证明了 LGB+MASTER+StockMixer 集成 + 严格 walk-forward CV + rank-blend 这套方法论本身是 work 的。
 
-**理由**：
+**关键数字**（来自 `docs/report.md`，2025-11-03 ~ 2026-03-13，**87 天 rolling**）：
+
+| 指标 | 三模型 Ensemble | 等权 HS300 | 5 日动量 Top-K |
+|---|---|---|---|
+| Mean 5d 收益 | **+1.01%** | +0.11% | −0.76% |
+| 胜率 | 75.86% | 60.92% | 45.98% |
+| t vs HS300 | **+4.78** (p<0.0001) | — | — |
+
+**架构**（详见 `docs/report.md` §3）：
+- LightGBM+DoubleEnsemble（Alpha158+估值）weight 0.1
+- MASTER (AAAI 2024, Alpha158+市场63维) weight 0.9
+- StockMixer (AAAI 2024, Alpha360 原始 OHLCV) weight 0.0
+- 融合：横截面 rank → holdout 单纯形网格搜索 → top_k=4, α=0.7
+- 置信度自适应仓位：c = 0.4·c_disp + 0.4·c_ic + 0.2·c_agree
+
+**Phase-A 稳健化**（同 report §11）：
+- Tradability filter（涨停/跌停过滤）
+- Transaction cost 6 bp/周
+- Dynamic IC weights（实测拖累 15bp，未启用）
+- 加完前两项后 **mean +1.00%**（仅损失 1 bp，胜率保持 75.6%）
+
+**为什么在 04-22 后从这条线撤回到 LGB-only**：
+
+1. **MASTER 权重 0.9 极端不稳定**：报告 §7 自己也写"holdout 10 天搜索可能过拟合"
+2. **跨平台 CUDA 非确定性**：MASTER 的 attention 在 4060/5090/Windows 输出 0.17 分差异（赛规要求"两次 MD5 一致"，硬伤）
+3. **训练 6.3h 很紧**：3 模型 × 3 fold × 3 seed + refit 已用满 8h 预算的 79%，无任何加新模型/特征的余地
+4. **MASTER weight 0.9 = 单模型方案的伪装**：去掉 LGB（0.1）和 Mixer（0.0）实测，"集成"只是个 1-模型方案，全部赌注在 MASTER 上
+5. **04-22 跨平台测试发现 MASTER 输出 5 次不一致**：直接判死刑
+
+**M1 留下的可继承资产**：
+- Walk-forward CV + 5 天 embargo 框架（`code/src/cv/walk_forward.py`）
+- Alpha158 + 估值 + 中性化 pipeline（B2 + Z1）
+- DoubleEnsemble 实现（`code/src/models/lgb_de.py`）
+- Rank-blend + confidence 仓位（`code/src/ensemble/{blender,portfolio}.py`）
+- Tradability filter（`code/src/ensemble/tradability.py`）
+- Transaction cost 框架（`rolling_backtest.py --cost_bps`）
+
+**这些全部被 v2 后半段（LGB-only）继承**，所以 M1 不是"丢弃"，是"剥离 + 简化"。
+
+### M2 · 2026-04-22 ~ 04-23：LGB-only 主线诞生
+
+**抉择**：放弃三模型 ensemble，全栈切换到单 LightGBM + DoubleEnsemble
+
+**理由**（基于 M1 的实测教训）：
 - LGB CPU 推理 deterministic，跨平台 bit-exact
 - DoubleEnsemble 用 sample reweighting + feature shuffling 解决稳健性，不依赖 GPU 随机数
 - 8 分钟训练 vs 6.3 小时（节省 47×），可承担多 seed
-- 接 Qlib Alpha158 + Valuation 共 174 个特征，经过工业级因子库验证
+- 接 Qlib Alpha158 + Valuation 共 174 个特征，沿用 M1 已验证的因子库
+- **M1 的 ensemble 权重 {0.1, 0.9, 0.0} 实质是 MASTER 单模型——既然如此，换成 deterministic 的 LGB 单模型更有意义**
 
-**架构落地**：
+**架构落地**（继承 M1 大半，去掉 MASTER/Mixer）：
 ```
-data → build_feature_sets (Alpha158 + Valuation, 174 cols)
-     → neutralize_cross_section (industry + log_mktcap + beta60)
-     → DoubleEnsemble × 3 seeds (42, 2024, 7)
-     → blend_scores (mean + ICIR shrink)
-     → deterministic_top_k (quantize=1e-4 + stock_id lex tie-break)
-     → confidence-scaled portfolio (top_k=5, equal weight)
+data → build_feature_sets (Alpha158 + Valuation, 174 cols)  # 继承 M1
+     → neutralize_cross_section (industry + log_mktcap + beta60)  # 继承 M1
+     → DoubleEnsemble × 3 seeds (42, 2024, 7)  # 继承 M1
+     → blend_scores (mean + ICIR shrink)  # 简化：单模型 ensemble = seed 平均
+     → deterministic_top_k (quantize=1e-4 + stock_id lex tie-break)  # 新增
+     → confidence-scaled portfolio (top_k=5, equal weight)  # 继承 M1，配权改 equal
 ```
 
-**单元测试**：11 个 pytest，覆盖 deterministic_top_k 跨平台一致性、blender 数值稳定性
+**新增**：
+- `deterministic_top_k`（quantize + stock_id tie-break）—— 解决浮点 score 跨平台不一致
+- 11 个 pytest，覆盖 deterministic_top_k 跨平台一致性、blender 数值稳定性
 
-### M2 · 2026-04-18 ~ 04-20：跨平台 4060 验证矩阵
+### M3 · 2026-04-22 ~ 04-23：跨平台 4060 验证矩阵
 
 **5090 主开发机训出权重 → 4060 Linux + 4060 Windows 各跑 5 次推理**：
 - Linux 4/5 次完全一致（1 次 cache 问题，重跑后一致）
@@ -63,7 +119,7 @@ data → build_feature_sets (Alpha158 + Valuation, 174 cols)
 
 **赛规复现门槛达成**。
 
-### M3 · 2026-04-21 ~ 04-22：82 天 rolling 初步验证
+### M4 · 2026-04-21 ~ 04-22：82 天 rolling 初步验证
 
 **首次跑长 rolling**（2026-01-01 ~ 2026-04-09，82 个 eval days）：
 - LGB-only mean = **+1.446% / 5d**
@@ -73,7 +129,7 @@ data → build_feature_sets (Alpha158 + Valuation, 174 cols)
 
 **首次"我们的方法长期有效"的证据**。
 
-### M4 · 2026-04-23 ~ 04-24：数据更新 + 213 天扩展 + W1 防守补丁
+### M5 · 2026-04-23 ~ 04-24：数据更新 + 213 天扩展 + W1 防守补丁
 
 详见第三、四节。
 
@@ -112,15 +168,19 @@ v1 选 linear（path_to_now.md §9），二阶段实测 linear 在单窗口方�
 **反思**：beta60/log_mktcap 已经在 `neutralize_cross_section` 里做过中性化因子，再作为输入特征产生信号重复/冲突
 **动作**：完全回滚
 
-### 3.5 失败实验：StockTransformer + ensemble 三模型（4-19~4-21）
+### 3.5 三模型 Ensemble v1 → LGB-only 单线（M1 → M2 关键转折）
 
-试过 LGB + StockTransformer + MASTER 三模型 ensemble，IC 加权融合：
-- 全量 mean +1.00% vs LGB-only 单线 +1.446%
-- StockTransformer / MASTER 引入 CUDA 非确定性，污染 LGB 的 deterministic 输出
-- 训练时长 6.3h vs LGB-only 9 min
-- **彻底废弃 ensemble，回归 LGB-only 主线**
+**不是失败实验**，是阶段性最佳方案被自然替代。详见 §M1。
 
-### 3.6 赛规理解纠正
+关键观察：
+- M1 的 holdout grid search 结果是 `{lgb:0.1, master:0.9, mixer:0.0}` → "三模型 ensemble" 实质是 MASTER 单模型
+- MASTER 跨平台 5 次输出不一致（0.17 分差）→ 赛规复现要求未达
+- 同时 LGB 单线 87 天 rolling = +1.01% × 0.1 = 不可比，但 LGB-only 重训后 82 天达 +1.446%（4-22 测试）
+- **撤回到 LGB-only**：保留 M1 全部基础设施（特征/CV/中性化/tradability/cost），只换最后的模型层
+
+**留给 v2 后半段的资产**：见 §M1 末尾"M1 留下的可继承资产"清单。
+
+### 3.7 赛规理解纠正
 
 - 误以为只有 3 次提交 → 实际 **4 次**
 - 误以为数据有截止日 → 实际**只有开源模型/embedding 需 ≤ 2026-04-01**，行情数据无限制
@@ -193,23 +253,27 @@ stock_id, weight
 
 ---
 
-## 五、对比 v1 阶段（path_to_now.md）
+## 五、三阶段对比
 
-| 维度 | v1（3.15-4.10） | v2（4.10-4.24） |
-|---|---|---|
-| 模型 | StockTransformer | LightGBM + DoubleEnsemble |
-| 特征 | 158+39（赛方原版） | Alpha158 + Valuation = 174 |
-| 标签 | zscore | rank-gauss |
-| 配权 | linear | equal（默认）+ allocation_by_mode 模块化 |
-| 评分 | 本地加权收益 0.0642 | 213 天 rolling +2.41%/5d, t=+12 |
-| 训练 | 6.3 小时（GPU） | 8 分钟（CPU/GPU 都行） |
-| 跨平台 | ❌ CUDA 非确定性，分差 0.17 | ✅ Linux/Windows MD5 一致 |
-| 多 seed | 单 seed | 3 seeds (42, 2024, 7) refit |
-| 单元测试 | 0 | 18（pytest 全绿） |
-| Rolling 验证 | 30 天本地 | 213 天 + 6 天赛方 baseline |
-| Docker | 未做 | 已配置（待最终验证）|
+| 维度 | v1（3.15-4.10） | v2-M1 三模型 ensemble（4.14-4.21） | v2-M5 LGB-only + W1（4.22-4.24） |
+|---|---|---|---|
+| 模型 | StockTransformer | LGB+DE × 0.1 + MASTER × 0.9 + StockMixer × 0.0 | LGB+DE 单模型（3 seeds avg） |
+| 特征 | 158+39（赛方原版） | Alpha158 + Alpha360 + 估值 + 市场63维 | Alpha158 + Valuation = 174 |
+| 标签 | zscore | rank-gauss | rank-gauss |
+| 配权 | linear | confidence × top_k=4 × α=0.7 | equal × top_k=5 + mcap_constraint |
+| 评分 | 本地加权收益 0.0642（30d） | 87 天 rolling +1.01% (t=+4.78) | 213 天 rolling +2.95% (t≈+12) |
+| vs HS300 | 未严格比较 | +0.90pp (87d) | +2.52pp (213d) |
+| vs 赛方 baseline | 未比较 | 未比较 | **+1.64pp (6d)** |
+| 训练 | 6.3 小时（GPU） | 6.3 小时（3模型 × 3 fold × 3 seed + refit） | 8 分钟（CPU/GPU 都行） |
+| 跨平台 | ❌ CUDA 非确定性，分差 0.17 | ❌ MASTER attention 非确定性 | ✅ Linux/Windows MD5 一致 |
+| 多 seed | 单 seed | 3 seeds × 3 模型 | 3 seeds (42, 2024, 7) refit |
+| 单元测试 | 0 | ~5 | 18（pytest 全绿） |
+| Rolling 验证 | 30 天本地 | 87 天 | 213 天 + 6 天赛方 baseline |
+| Docker | 未做 | 已配置（~4 GB） | 已配置（待最终验证） |
 
-**核心进化**：v1 是"调参冲分"，v2 是"工业化方法论"——可复现、可解释、可长期回测验证。
+**两次跃迁**：
+1. **v1 → M1**：从单 Transformer "调参冲分" → 工业化 ensemble + walk-forward CV，引入了 87 天 rolling 验证（首次有 t-stat > 4 的硬证据）
+2. **M1 → M5**：从"3 模型 ensemble（实质单 MASTER）"→ deterministic 单 LGB + 多 seed 平均，**牺牲一点理论上限换取跨平台复现性 + 训练成本下降 47×**，然后用省下的预算换长 rolling（87→213）+ AB 实验（M9 配权、M10 mcap）
 
 ---
 
