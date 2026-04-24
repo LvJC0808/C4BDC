@@ -114,6 +114,53 @@ def grid_search_portfolio_params(
     return best
 
 
+def mcap_constrained_topk(
+    scores: pd.DataFrame,
+    mktcap: pd.DataFrame,
+    k: int = 5,
+    candidate_k: int = 10,
+    min_large_cap: int = 2,
+    large_cap_quantile: float = 0.5,
+    score_col: str = "score",
+    id_col: str = "stock_id",
+) -> pd.DataFrame:
+    """Select k picks from top candidate_k, enforcing >= min_large_cap large-caps.
+
+    Large-cap threshold = quantile of log_mktcap over the passed-in mktcap frame.
+    If the top-candidate_k contains fewer than min_large_cap large-caps, FALL BACK
+    to plain deterministic_top_k(k).
+    """
+    candidates = deterministic_top_k(
+        scores, k=candidate_k, score_col=score_col, id_col=id_col
+    )
+    if min_large_cap <= 0 or len(candidates) <= k:
+        return candidates.head(k).reset_index(drop=True)
+
+    mcap = mktcap[[id_col, "log_mktcap"]].drop_duplicates(id_col)
+    threshold = float(mcap["log_mktcap"].quantile(large_cap_quantile))
+    merged = candidates.merge(mcap, on=id_col, how="left")
+    merged["is_large"] = merged["log_mktcap"].fillna(-np.inf) >= threshold
+
+    large_in_candidates = int(merged["is_large"].sum())
+    if large_in_candidates < min_large_cap:
+        return candidates.head(k).reset_index(drop=True)
+
+    top_k_slice = merged.head(k).copy()
+    need = min_large_cap - int(top_k_slice["is_large"].sum())
+    if need <= 0:
+        return top_k_slice.drop(columns=["log_mktcap", "is_large"]).reset_index(drop=True)
+
+    remainder = merged.iloc[k:]
+    add_large = remainder[remainder["is_large"]].head(need)
+    smallcaps_in_top = top_k_slice[~top_k_slice["is_large"]]
+    drop_ids = smallcaps_in_top.tail(need)[id_col].tolist()
+    kept = top_k_slice[~top_k_slice[id_col].isin(drop_ids)]
+    out = pd.concat([kept, add_large], ignore_index=True)
+    out = out.sort_values(by=["score_q", id_col], ascending=[False, True],
+                           kind="mergesort").reset_index(drop=True)
+    return out.drop(columns=["log_mktcap", "is_large"])
+
+
 def _self_test() -> None:
     rng = np.random.default_rng(1)
     dates = pd.date_range("2024-01-01", periods=5, freq="D")
