@@ -1,6 +1,59 @@
+# Python
 __pycache__
 *.pyc
-.git
+*.pyo
+*.pyd
 .venv
+.Python
+*.egg-info
+dist
+build
+
+# Version control / IDE
+.git
+.gitignore
 .vscode
 .idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Internal methodology & reports (not for judges)
+docs/
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+
+# Tests & unit test artifacts
+test/
+.pytest_cache
+.coverage
+htmlcov
+*.md5
+
+# Dev intermediates (will be regenerated inside container)
+temp/
+*.log
+
+# Submission archives & packaging
+*.tar
+*.tar.gz
+*.zip
+w1-handoff-*.tar.gz
+model_lgb_only.w1snapshot/
+model_lgb_only.backup/
+
+# Editor / OS cruft
+*.bak
+*~
+.ipynb_checkpoints
+
+# Environment / secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Misc
+output/result*.csv
