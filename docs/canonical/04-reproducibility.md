@@ -38,11 +38,13 @@
 
 **实验**：同一训练好的权重，在不同硬件上跑推理 5 次。
 
-| 硬件 | OS | Python | pandas | 5 次 MD5 一致 | 行尾符 | MD5 |
-|---|---|---|---|---|---|---|
-| RTX 5090 32 GB | Linux | 3.12 | 2.3.3 | ✅ 5/5 | LF | `f13034946c0aaea5cb1e3f2d0d6ad692` |
-| RTX 4060 8 GB | Linux | 3.12 | 2.3.3 | ✅ 5/5 | LF | `f13034946c0aaea5cb1e3f2d0d6ad692` |
-| RTX 4060 8 GB | Windows | 3.12 | 2.3.3 | ✅ 5/5 | CRLF → LF | `f13034946c0aaea5cb1e3f2d0d6ad692` |
+| 硬件 | OS | CPU | AVX-512 | Python | 5 次 MD5 一致 | 行尾 | MD5 |
+|---|---|---|---|---|---|---|---|
+| RTX 5090 32 GB | Linux | Xeon Gold 6530 | ✅ | 3.12 | ✅ 5/5 | LF | `f13034946...` |
+| RTX 4060 8 GB | Linux | **i7-13700H** | **❌（仅 avx, avx2, avx_vnni）** | 3.12 | ✅ 5/5 | LF | `f13034946...` |
+| RTX 4060 8 GB | Windows | （未记录） | （未记录） | 3.12 | ✅ 5/5 | CRLF → LF | `f13034946...` |
+
+**关键实证（W1 build, 2026-04-25）**：Linux 4060 队友节点 CPU 为 **i7-13700H，无 AVX-512**，但完整跑通场景 A + 场景 B + tar 回路验证三关，MD5 全部一致 = `f13034946c0aaea5cb1e3f2d0d6ad692`。这直接证明 **AVX-512 不是 MD5 一致性的必要条件**，与赛方评测机 i7-13650H（同代 13 代 Intel Mobile，亦无 AVX-512）的复现把握**显著上升**。
 
 **行尾符差异已修复**（Phase 4 commit `42abc7f`）：`result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")` 强制 LF 输出。
 
@@ -120,9 +122,15 @@ result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")
 
 **说明**：以上假说**未在本项目内做过控制变量实验**。当时 VM 的 MD5 差异可能由上述任一或多个因素叠加产生；在包版本锁定（commit `2599904`）与 LF 强制（commit `42abc7f`）之后，三节点实测一致，但未回头在 VM 上重测。
 
+**新进展（W1 build 实证, 2026-04-25）**：
+- Linux 4060 队友节点（i7-13700H，无 AVX-512）完整跑通场景 A + 场景 B + tar 回路验证，全部 MD5 = `f13034946c0aaea5cb1e3f2d0d6ad692` ✅
+- 这意味着在最新 commit（镜像锁版 + LF + deterministic_top_k）下，**不依赖 AVX-512 也能跨节点一致**
+- "AVX-512 假说"基本被推翻；当年 VM 的 MD5 差异**最可能来自包版本/LF 等已修复因素**，而非 SIMD 路径
+- 赛方 i7-13650H 与已验证的 i7-13700H 同代同架构，复现把握**显著上升**（但仍不是直接实测）
+
 **缓解（当前采用）**：
-- 以**已复现 golden MD5** 的队友节点（Linux i7-13700H / Windows 4060）作为最终打包节点
-- 赛规 PDF 明确赛方评测机为 i7-13650H，与 Linux 队友同为 13 代 Intel 移动端；但**赛方能否复现本项目内未做直接实测**，仍属残留风险
+- 以**已复现 golden MD5** 的队友节点（Linux i7-13700H）作为最终打包节点
+- 赛规 PDF 明确赛方评测机为 i7-13650H，与 Linux 队友同为 13 代 Intel 移动端
 - 详见 `docs/handoff/2026-04-25-w1-build-linux.md` §2.3
 
 ### 4.2 Python 包版本漂移
@@ -175,7 +183,8 @@ result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")
 |---|---|---|---|
 | `w1-handoff-20260424.tar.gz` | `/root/shared-nvme/` | `f14904c1...` | 给队友的 data + weights 包 |
 | `w1-data-20260424-final.tar.gz` | `/root/shared-nvme/` | `9b3eb781...` | 更新版 data+weights（修正老版） |
-| `LCF@NUDT.tar` | 待打包 | 待定 | 赛方提交用 Docker image tar |
+| `w1-data-20260425-fix.tar.gz` | `/root/shared-nvme/` | `11d30eb5af3b3a676c60b897d5cae119` | 场景 B 修复包（仅 6 csv，19 MB）|
+| **`LCF@NUDT.tar`** | **队友 D:\C4大数据\** | **`1a4ef9430f59e9281406f051dec0fa70`** | **W1 提交镜像 tar（1.7 GB，✅ 已打包）** |
 | `requirements-submission.txt` | 仓库根 | 版本锁定 | Docker 精确安装清单 |
 
 ---
