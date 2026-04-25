@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Ensure runtime dirs exist (in case mounts are empty)
 mkdir -p /app/model /app/output /app/temp
@@ -9,7 +9,6 @@ mkdir -p /app/model /app/output /app/temp
 # Our pipeline needs stock_data.csv + 5 auxiliary CSVs. If missing, reconstruct.
 # ==============================================================================
 
-need_heal=0
 required_files=(
     "stock_data.csv"
     "industry_map.csv"
@@ -18,7 +17,32 @@ required_files=(
     "stock_basic.csv"
     "trade_calendar.csv"
 )
-for f in "${required_files[@]}"; do
+
+schema_ok() {
+    local path="$1"
+    python - "$path" <<'PY'
+import sys
+from pathlib import Path
+
+from code.src.data_schema import stock_data_schema_missing
+
+path = Path(sys.argv[1])
+if not path.exists():
+    print("[init] stock_data.csv missing", file=sys.stderr)
+    sys.exit(1)
+missing = stock_data_schema_missing(path)
+if missing:
+    print(f"[init] stock_data.csv missing required columns: {missing}", file=sys.stderr)
+    sys.exit(1)
+print("[init] stock_data.csv schema OK", file=sys.stderr)
+PY
+}
+
+need_heal=0
+if ! schema_ok "/app/data/stock_data.csv"; then
+    need_heal=1
+fi
+for f in "${required_files[@]:1}"; do
     if [ ! -f "/app/data/$f" ]; then
         need_heal=1
         break
@@ -26,10 +50,15 @@ for f in "${required_files[@]}"; do
 done
 
 if [ "$need_heal" = "1" ]; then
-    echo "[init] /app/data/ missing required CSVs; self-healing from /app/data_bundled/"
+    echo "[init] /app/data/ incomplete or incompatible; self-healing from /app/data_bundled/"
 
-    # 1. If judges provided train.csv + test.csv, merge them into stock_data.csv
-    if [ -f "/app/data/train.csv" ] && [ -f "/app/data/test.csv" ] && [ ! -f "/app/data/stock_data.csv" ]; then
+    stock_ready=0
+    if schema_ok "/app/data/stock_data.csv"; then
+        stock_ready=1
+    fi
+
+    # 1. If judges provided train.csv + test.csv, merge them into stock_data.csv.
+    if [ "$stock_ready" = "0" ] && [ -f "/app/data/train.csv" ] && [ -f "/app/data/test.csv" ]; then
         echo "[init] merging /app/data/{train,test}.csv -> /app/data/stock_data.csv"
         python - <<'PY'
 import pandas as pd, os
@@ -40,21 +69,43 @@ full = full.drop_duplicates(subset=["股票代码", "日期"]).sort_values(["股
 full.to_csv("/app/data/stock_data.csv", index=False, encoding="utf-8-sig")
 print(f"[init] merged stock_data.csv: {len(full)} rows")
 PY
+        if schema_ok "/app/data/stock_data.csv"; then
+            stock_ready=1
+        else
+            echo "[init] merged stock_data.csv still incompatible; falling back to bundled copy"
+        fi
     fi
 
-    # 2. Copy auxiliary files from bundled backup if still missing
-    for f in "${required_files[@]}"; do
+    # 2. Fall back to bundled stock_data.csv when judge-provided schema is not usable.
+    if [ "$stock_ready" = "0" ] && [ -f "/app/data_bundled/stock_data.csv" ]; then
+        echo "[init] restoring stock_data.csv from /app/data_bundled/"
+        cp "/app/data_bundled/stock_data.csv" "/app/data/stock_data.csv"
+        schema_ok "/app/data/stock_data.csv"
+        stock_ready=1
+    fi
+
+    # 3. Copy auxiliary files from bundled backup if still missing
+    for f in "${required_files[@]:1}"; do
         if [ ! -f "/app/data/$f" ] && [ -f "/app/data_bundled/$f" ]; then
             echo "[init] restoring $f from /app/data_bundled/"
             cp "/app/data_bundled/$f" "/app/data/$f"
         fi
     done
 
-    # 3. Also restore hs300_stock_list.csv (used by fetch_all.py, non-critical)
+    # 4. Also restore hs300_stock_list.csv (used by fetch_all.py, non-critical)
     if [ -f "/app/data_bundled/hs300_stock_list.csv" ] && [ ! -f "/app/data/hs300_stock_list.csv" ]; then
         cp /app/data_bundled/hs300_stock_list.csv /app/data/hs300_stock_list.csv
     fi
 fi
+
+# Final data sanity check
+schema_ok "/app/data/stock_data.csv"
+for f in "${required_files[@]:1}"; do
+    if [ ! -f "/app/data/$f" ]; then
+        echo "[init] missing required file after self-heal: /app/data/$f" >&2
+        exit 1
+    fi
+done
 
 # Final dependency sanity check
 python -c "import lightgbm, numpy, pandas, scipy, sklearn, pyarrow, talib; print('[init] deps OK')"
