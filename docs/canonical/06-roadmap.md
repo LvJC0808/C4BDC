@@ -10,15 +10,18 @@
 
 | 事项 | 责任方 | 状态 |
 |---|---|---|
-| Linux 4060 队友重 build Docker | 队友 | ✅ 完成（1.75 GB） |
-| 本机验证场景 A MD5 = `f13034946...` | 队友 | ✅ 完成 |
-| 本机验证场景 B（模拟赛方挂载） | 队友 | ✅ 完成（Top-5 + MD5 双一致） |
-| 导出 `LCF@NUDT.tar` | 队友 | ✅ 完成（MD5 `1a4ef943...`） |
-| tar 回路验证 | 队友 | ✅ 完成 |
+| Linux 4060 队友重 build Docker | 队友 | ✅ 完成（1.75 GB，旧 tar 已作废）|
+| 本机验证场景 A MD5 = `f13034946...` | 队友 + WSL | ✅ 双节点完成 |
+| 本机验证场景 B（仓库 16 列模拟挂载） | 队友 + WSL | ✅ 完成 |
+| **真场景 B'（baseline 12 列模拟）** | WSL | ✅ 命中 fallback，MD5 一致 |
+| **schema-fix（commit `32f57ac`）init.sh 加 schema guard** | 主开发 + Codex | ✅ 完成 |
+| 导出最终 `LCF@NUDT.tar` (526 MB) | WSL | ✅ MD5 `707133307d...` |
+| tar 回路验证 | WSL | ✅ MD5 一致 |
+| 旧 tar 全部作废 | — | ✅ 通知 |
 | 上传夸克网盘 + 分享链接 | 组长 | ⏳ |
 | 竞赛平台提交链接 + result.csv | 组长 | ⏳ |
 
-详见 `../handoff/2026-04-25-w1-build-linux.md` 与 `../submission/W1-submission-log.md`。
+详见 `../handoff/2026-04-25-w1-build-linux.md`、`../submission/W1-submission-log.md`、`../findings/2026-04-25-judge-data-schema-mismatch.md`。
 
 ---
 

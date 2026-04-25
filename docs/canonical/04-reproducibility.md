@@ -159,6 +159,24 @@ result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")
 
 **状态**：✅ Phase 4 已解决。
 
+### 4.4 赛方 data 字段 schema 漂移（2026-04-25 W1 提交前发现）
+
+**风险**：赛方 baseline 仓库的 `train.csv / test.csv / stock_data.csv` 全部为 **12 列**（基础量价），不含 `peTTM, pbMRQ, psTTM, pcfNcfTTM` 4 个估值列。我们模型训练用的是 16 列数据，`code/src/features/valuation.py` 强依赖估值列 → 评测时直接 `KeyError`。
+
+**早期未发现的原因**：之前所有"场景 B"测试都用我们仓库 16 列 csv 模拟赛方挂载，从未真用 baseline 12 列数据测试。
+
+**最终解法**（commit `32f57ac`）：
+- `init.sh` 启动时检测 `/app/data/stock_data.csv` 是否含估值 4 列
+- 若缺，强制用镜像内 `/app/data_bundled/stock_data.csv` 替换
+- merge train+test 也走同样检测，缺列直接 fallback
+
+**真场景 B' 验收**（baseline 12 列 csv 模拟赛方）：
+- 容器日志命中 `merged stock_data.csv still incompatible; falling back to bundled copy`
+- result.csv MD5 = `f13034946c0aaea5cb1e3f2d0d6ad692` ✅
+- 详见 `docs/findings/2026-04-25-judge-data-schema-mismatch.md`
+
+**状态**：✅ Phase 4 已解决。
+
 ---
 
 ## 5. 完整复现性验证矩阵（W1 提交前截图）
@@ -189,7 +207,9 @@ result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")
 | `w1-handoff-20260424.tar.gz` | `/root/shared-nvme/` | `f14904c1...` | 给队友的 data + weights 包 |
 | `w1-data-20260424-final.tar.gz` | `/root/shared-nvme/` | `9b3eb781...` | 更新版 data+weights（修正老版） |
 | `w1-data-20260425-fix.tar.gz` | `/root/shared-nvme/` | `11d30eb5af3b3a676c60b897d5cae119` | 场景 B 修复包（仅 6 csv，19 MB）|
-| **`LCF@NUDT.tar`** | **队友 D:\C4大数据\** | **`1a4ef9430f59e9281406f051dec0fa70`** | **W1 提交镜像 tar（1.7 GB，✅ 已打包）** |
+| ~~`LCF@NUDT.tar`（旧 1.7 GB）~~ | ~~队友 D:\C4大数据\~~ | ~~`1a4ef9430f59e9281406f051dec0fa70`~~ | **作废**（schema 未修，B' 场景会崩）|
+| ~~`LCF@NUDT.tar`（旧 526 MB OCI）~~ | ~~WSL `/mnt/e/C4BD/`~~ | ~~`1bb239f9a55198008b88fee31b946315`~~ | **作废**（schema 未修）|
+| **`LCF@NUDT.tar`（最终）** | **WSL `/mnt/e/C4BD/`** | **`707133307dad3f7a221e74e507deede0`** | **W1 提交件（526 MB OCI，含 schema-fix `32f57ac`，✅ B' 验收通过）**|
 | `requirements-submission.txt` | 仓库根 | 版本锁定 | Docker 精确安装清单 |
 
 ---

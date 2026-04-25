@@ -6,13 +6,20 @@
 
 ---
 
-## 1. 提交件清单
+## 1. 提交件清单（最终版）
 
 | 件 | 文件名 | 大小 | MD5 | 状态 |
 |---|---|---|---|---|
 | 结果文件 | `result.csv` | 5 行 | `f13034946c0aaea5cb1e3f2d0d6ad692` | ✅ 已生成 |
-| Docker 镜像 tar | `LCF@NUDT.tar` | 1.7 GB | `1a4ef9430f59e9281406f051dec0fa70` | ✅ 已打包 |
+| **Docker 镜像 tar（最终）** | **`LCF@NUDT.tar`** | **526 MB（OCI）** | **`707133307dad3f7a221e74e507deede0`** | **✅ 含 schema-fix `32f57ac`** |
 | 网盘分享链接 | 夸克网盘 | — | — | ⏳ 组长上传 |
+
+### 已作废（不可提交）
+
+| 件 | MD5 | 作废原因 |
+|---|---|---|
+| ~~`LCF@NUDT.tar`（队友 1.7 GB legacy）~~ | `1a4ef9430f59e9281406f051dec0fa70` | schema 未修，赛方 12 列 csv 会崩 |
+| ~~`LCF@NUDT.tar`（WSL 526 MB OCI 旧）~~ | `1bb239f9a55198008b88fee31b946315` | schema 未修 |
 
 **result.csv 内容**：
 ```
@@ -43,15 +50,16 @@ stock_id,weight
 
 ---
 
-## 3. 五关验收（全过 ✅）
+## 3. 验收矩阵（schema-fix 后六关全过 ✅）
 
 | 关 | 验证项 | 期望 | 实测 | 结果 |
 |---|---|---|---|---|
 | 1 | 场景 A · 完整 data | MD5 `f13034946...` | `f13034946c0aaea5cb1e3f2d0d6ad692` | ✅ |
-| 2 | 场景 B · 模拟赛方挂载（仅 train+test） | Top-5 一致 + MD5 一致 | Top-5 完全一致，MD5 = `f13034946...` | ✅ |
-| 3 | `docker save` → tar | tar 大小 1.6-1.8 GB | 1.7 GB | ✅ |
-| 4 | tar 回路验证（load + run） | MD5 仍 `f13034946...` | `f13034946c0aaea5cb1e3f2d0d6ad692` | ✅ |
-| 5 | 网盘下载回 MD5 一致 | tar MD5 = `1a4ef943...` | ⏳ 组长执行 | ⏳ |
+| 2 | 场景 B · 仓库 16 列模拟挂载 | Top-5 一致 + MD5 一致 | `f13034946...` | ✅ |
+| 3 | **场景 B' · baseline 12 列模拟（真赛方场景）** | **Fallback 触发 + MD5 一致** | **命中 fallback 日志，MD5 `f13034946...`** | **✅** |
+| 4 | `docker save` → 最终 tar | OCI 格式 526 MB | 526 MB | ✅ |
+| 5 | tar 回路验证（load + run） | MD5 仍 `f13034946...` | `f13034946c0aaea5cb1e3f2d0d6ad692` | ✅ |
+| 6 | 网盘下载回 MD5 一致 | tar MD5 = `707133307d...` | ⏳ 组长执行 | ⏳ |
 
 ---
 
@@ -117,8 +125,9 @@ stock_id,weight
 
 ## 8. 已知残留风险
 
-1. **赛方机器复现一致性**：未直接实测，但 i7-13700H 同代实证削弱该风险
-2. **场景 B init.sh 自愈逻辑** 在赛方真实挂载条件下的鲁棒性：已通过本地模拟验证（target date 2026-04-23 一致）
+1. **赛方机器复现一致性**：未直接实测，但 i7-13700H + i9-13900HX 两个 13 代 Intel Mobile 无 AVX-512 节点已实证削弱该风险
+2. ~~场景 B init.sh 自愈逻辑在赛方真实挂载条件下的鲁棒性~~ ✅ **已通过 schema-fix `32f57ac` + 真场景 B' 实证关闭**
+3. **OCI vs Legacy tar 格式**：最终 tar 是 Docker 26+ 默认 OCI 格式（526 MB）。赛方若用 Docker < 25 可能 load 失败。OCI 是 Docker 主推格式，赛方使用现代 Docker 概率高。无可行的 zero-cost 缓解。
 
 ---
 

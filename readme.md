@@ -1,9 +1,9 @@
 # THU-BDC2026 · LGB-only 主线方案（W1 提交版）
 
-> 队伍：LCF@NUDT · 提交日：2026-04-25 · 分支：`feat/ensemble-v1` · 对应 commit：`13edae3+`
+> 队伍：LCF@NUDT · 提交日：2026-04-25 · 分支：`feat/ensemble-v1` · 对应 commit：`32f57ac+`
 > Top-5（target = 2026-04-23）：`300308, 600023, 688187, 688256, 002714`（各 0.2）
 > `result.csv` MD5：`f13034946c0aaea5cb1e3f2d0d6ad692`
-> Docker tar `LCF@NUDT.tar` MD5：`1a4ef9430f59e9281406f051dec0fa70`
+> Docker tar `LCF@NUDT.tar`（526 MB OCI）MD5：`707133307dad3f7a221e74e507deede0`
 
 本文档按赛方《代码规范》§3 readme.md 模板顺序编写，章节与模板一一对应。
 
