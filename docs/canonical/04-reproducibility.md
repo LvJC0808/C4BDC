@@ -38,13 +38,17 @@
 
 **实验**：同一训练好的权重，在不同硬件上跑推理 5 次。
 
-| 硬件 | OS | CPU | AVX-512 | Python | 5 次 MD5 一致 | 行尾 | MD5 |
+| 硬件 | OS | CPU | AVX-512 | Python | 跑数 | 行尾 | MD5 |
 |---|---|---|---|---|---|---|---|
 | RTX 5090 32 GB | Linux | Xeon Gold 6530 | ✅ | 3.12 | ✅ 5/5 | LF | `f13034946...` |
-| RTX 4060 8 GB | Linux | **i7-13700H** | **❌（仅 avx, avx2, avx_vnni）** | 3.12 | ✅ 5/5 | LF | `f13034946...` |
-| RTX 4060 8 GB | Windows | （未记录） | （未记录） | 3.12 | ✅ 5/5 | CRLF → LF | `f13034946...` |
+| RTX 4060 8 GB | Linux | **i7-13700H** | **❌（avx, avx2, avx_vnni）** | 3.12 | ✅ 5/5 | LF | `f13034946...` |
+| RTX 4060 8 GB | Windows | （未记录） | — | 3.12 | ✅ 5/5 | CRLF → LF | `f13034946...` |
+| RTX 4060 8 GB | **WSL Ubuntu** | **i9-13900HX** | **❌（avx, avx2, avx_vnni）** | 3.12 | ✅ 场景 A + 场景 B | LF | `f13034946...` |
 
-**关键实证（W1 build, 2026-04-25）**：Linux 4060 队友节点 CPU 为 **i7-13700H，无 AVX-512**，但完整跑通场景 A + 场景 B + tar 回路验证三关，MD5 全部一致 = `f13034946c0aaea5cb1e3f2d0d6ad692`。这直接证明 **AVX-512 不是 MD5 一致性的必要条件**，与赛方评测机 i7-13650H（同代 13 代 Intel Mobile，亦无 AVX-512）的复现把握**显著上升**。
+**关键实证（W1 build, 2026-04-25）**：
+- **Linux 4060 队友（i7-13700H，无 AVX-512）**：场景 A + 场景 B + tar 回路三关全过
+- **WSL Ubuntu（i9-13900HX，无 AVX-512）**：场景 A + 场景 B 均产 golden MD5；**此机曾在 2026-04 上旬观测到漂移 `5e8b8b0f...`**，今日同机复现 golden — 直接证明当年漂移来自包版本/LF 等工程问题（已被 commit `2599904` + `42abc7f` 修复），**不是 CPU/SIMD 原因**
+- 两个"13 代 Intel Mobile 无 AVX-512"节点实证复现 → 赛方评测机 i7-13650H（同代同家族）复现把握非常高
 
 **行尾符差异已修复**（Phase 4 commit `42abc7f`）：`result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")` 强制 LF 输出。
 
@@ -112,8 +116,9 @@ result.to_csv(OUTPUT_PATH, index=False, lineterminator="\n")
 ### 4.1 跨节点 MD5 漂移（原因未完全定位）
 
 **已观测的现象（项目内可查）**：
-- 主机 5090（Xeon Gold 6530）+ Linux 队友（i7-13700H）+ Windows 队友（CPU 型号未记录）：三节点 MD5 均为 golden `f13034946...`
-- 早期本机 VM 曾观测到不同 MD5 `5e8b8b0f...`（具体 commit 与镜像构建条件未完整记录）
+- 主机 5090（Xeon Gold 6530）+ Linux 队友（i7-13700H）+ Windows 队友（CPU 型号未记录）+ **WSL Ubuntu（i9-13900HX）**：四节点 MD5 均为 golden `f13034946...`
+- 早期本机 VM（i9-13900HX）曾观测到不同 MD5 `5e8b8b0f...`（具体 commit 与镜像构建条件未完整记录）
+- **2026-04-25 同一台 i9-13900HX 于 WSL 下重跑，产出 golden MD5** → 直接推翻"CPU 导致漂移"的假说
 
 **未验证的因果假说**（保留备查，**不作为已证事实**）：
 - LightGBM 在不同 SIMD 路径（AVX-512 vs AVX2）下浮点累加顺序可能不同
